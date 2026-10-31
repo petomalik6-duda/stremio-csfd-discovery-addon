@@ -13,8 +13,9 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.3.4';
+const ADDON_VERSION = process.env.npm_package_version || '1.3.5';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
+const FILMOGRAPHY_PAGE_SIZE = 20;
 const app = express();
 
 const searchableBrowseExtra = [
@@ -36,9 +37,9 @@ const filmographySearchExtra = [
 ];
 
 const catalogs = [
-  { type: 'person', id: 'csfd-people', name: '👤 People – herci, režiséri a tvorcovia', extra: peopleSearchExtra },
-  { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia osoby – filmy', extra: filmographySearchExtra },
-  { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia osoby – seriály', extra: filmographySearchExtra },
+  { type: 'person', id: 'csfd-people', name: '👤 People – herci, režiséri a tvorcovia', extra: peopleSearchExtra, pageSize: 20 },
+  { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia osoby – filmy', extra: filmographySearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia osoby – seriály', extra: filmographySearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
   { type: 'movie', id: 'csfd-popular-movies', name: '🔥 Discovery – Populárne filmy', extra: searchableBrowseExtra },
   { type: 'movie', id: 'csfd-top-movies', name: '⭐ Discovery – Najlepšie hodnotené filmy', extra: browseExtra },
   { type: 'movie', id: 'csfd-new-movies', name: '🆕 Discovery – Nové filmy', extra: browseExtra },
@@ -53,7 +54,7 @@ const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD Discovery – filmy, seriály a tvorcovia',
-  description: 'People vyhľadávanie a samostatná filmografia filmov a seriálov. Filmografické katalógy používajú štandardné TMDB/IMDb identity a sú zoradené od najnovšieho po najstarší titul.',
+  description: 'People vyhľadávanie a samostatná filmografia filmov a seriálov. Filmografické katalógy používajú štandardné TMDB/IMDb identity, hodnotenie, 20-položkové stránkovanie a zoradenie od najnovšieho po najstarší titul.',
   resources: [
     'catalog',
     { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
@@ -75,7 +76,9 @@ const manifest = {
       movieCatalogId: 'csfd-person-movies',
       seriesCatalogId: 'csfd-person-series',
       standardMediaIds: true,
-      sort: 'release_date_desc'
+      sort: 'release_date_desc',
+      pageSize: FILMOGRAPHY_PAGE_SIZE,
+      ratingSource: 'TMDB'
     }
   }
 };
@@ -102,6 +105,20 @@ function knownCatalog(type, id) {
   return catalogs.some(c => c.type === type && c.id === id);
 }
 
+function toFilmographyCatalogMeta(meta) {
+  const clean = toPublicMeta(meta);
+  if (!clean) return clean;
+  const rating = clean.imdbRating != null && clean.imdbRating !== ''
+    ? Number(clean.imdbRating).toFixed(1)
+    : null;
+  const year = String(clean.releaseInfo || '').trim() || null;
+  const labels = [year, rating ? `⭐ ${rating}` : null].filter(Boolean);
+  return {
+    ...clean,
+    releaseInfo: labels.length ? labels.join(' • ') : clean.releaseInfo
+  };
+}
+
 async function catalogResponse(type, id, extra = {}) {
   if (!knownCatalog(type, id)) return { metas: [] };
   const skip = Math.max(0, Number(extra.skip || 0));
@@ -112,16 +129,16 @@ async function catalogResponse(type, id, extra = {}) {
     const started = Date.now();
     const rows = await searchPeople(q, 20);
     const page = rows.slice(skip, skip + 20);
-    console.log(`[people-search] q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
+    console.log(`[people-search] q=${JSON.stringify(q)} skip=${skip} count=${page.length} ms=${Date.now() - started}`);
     return { metas: page };
   }
 
   if (id === 'csfd-person-movies' || id === 'csfd-person-series') {
     if (!q) return { metas: [] };
     const started = Date.now();
-    const rows = await searchFilmography(q, type, 20);
-    const page = rows.slice(skip, skip + 20).map(toPublicMeta);
-    console.log(`[filmography-search] type=${type} q=${JSON.stringify(q)} count=${page.length} sort=newest-first ms=${Date.now() - started}`);
+    const rows = await searchFilmography(q, type, FILMOGRAPHY_PAGE_SIZE, skip);
+    const page = rows.map(toFilmographyCatalogMeta);
+    console.log(`[filmography-search] type=${type} q=${JSON.stringify(q)} skip=${skip} pageSize=${FILMOGRAPHY_PAGE_SIZE} count=${page.length} sort=newest-first rating=tmdb ms=${Date.now() - started}`);
     return { metas: page };
   }
 
@@ -142,7 +159,7 @@ app.get('/', (_req, res) => {
 <html lang="sk"><head><meta charset="utf-8"><title>ČSFD Discovery</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px">
 <h1>ČSFD Discovery – Stremio/Nuvio addon</h1>
-<p>Vyhľadáva filmy, seriály a osoby. Filmografia osoby je v samostatných movie/series katalógoch, zoradených od najnovšieho po najstarší titul.</p>
+<p>Vyhľadáva filmy, seriály a osoby. Filmografia osoby je v samostatných movie/series katalógoch, zoradených od najnovšieho po najstarší titul, s TMDB hodnotením a stránkovaním po 20 položkách.</p>
 <ul>
 <li><a href="/manifest.json">manifest.json</a></li>
 <li><a href="/health">health</a></li>
@@ -150,6 +167,7 @@ app.get('/', (_req, res) => {
 <li><a href="/debug/people?q=Brad%20Pitt">debug People: Brad Pitt</a></li>
 <li><a href="/debug/filmography?type=movie&q=Brad%20Pitt">debug filmografia – filmy: Brad Pitt</a></li>
 <li><a href="/debug/filmography?type=series&q=Brad%20Pitt">debug filmografia – seriály: Brad Pitt</a></li>
+<li><a href="/debug/filmography?type=movie&q=Brad%20Pitt&skip=20">debug filmografia – filmy: Brad Pitt, strana 2</a></li>
 <li><a href="/debug/search?type=movie&q=Fight%20Club">debug názov filmu: Fight Club</a></li>
 </ul>
 <p>Príklady: <code>Brad Pitt</code>, <code>Tom Hanks</code>, <code>režisér: Christopher Nolan</code>, <code>scenárista: Aaron Sorkin</code>.</p>
@@ -214,6 +232,9 @@ app.get('/health', async (_req, res) => {
     personFilmographyCatalogs: true,
     standardFilmographyMediaIds: true,
     filmographyNewestFirst: true,
+    filmographyPagination: true,
+    filmographyPageSize: FILMOGRAPHY_PAGE_SIZE,
+    filmographyRatingSource: 'TMDB',
     at: new Date().toISOString()
   });
 });
@@ -225,7 +246,10 @@ app.get('/stats', (_req, res) => res.json({
   peopleEnabled: true,
   personFilmographyCatalogs: true,
   standardFilmographyMediaIds: true,
-  filmographyNewestFirst: true
+  filmographyNewestFirst: true,
+  filmographyPagination: true,
+  filmographyPageSize: FILMOGRAPHY_PAGE_SIZE,
+  filmographyRatingSource: 'TMDB'
 }));
 
 app.get('/debug/people', async (req, res, next) => {
@@ -242,10 +266,21 @@ app.get('/debug/filmography', async (req, res, next) => {
   try {
     const type = req.query.type === 'series' ? 'series' : 'movie';
     const q = String(req.query.q || '').trim();
+    const skip = Math.max(0, Number(req.query.skip || 0));
     const started = Date.now();
-    const metas = q ? await searchFilmography(q, type, 20) : [];
-    console.log(`[debug-filmography] type=${type} q=${JSON.stringify(q)} count=${metas.length} sort=newest-first ms=${Date.now() - started}`);
-    res.json({ ok: true, type, q, count: metas.length, elapsedMs: Date.now() - started, metas: metas.map(toPublicMeta) });
+    const metas = q ? await searchFilmography(q, type, FILMOGRAPHY_PAGE_SIZE, skip) : [];
+    const publicMetas = metas.map(toFilmographyCatalogMeta);
+    console.log(`[debug-filmography] type=${type} q=${JSON.stringify(q)} skip=${skip} count=${publicMetas.length} sort=newest-first rating=tmdb ms=${Date.now() - started}`);
+    res.json({
+      ok: true,
+      type,
+      q,
+      skip,
+      pageSize: FILMOGRAPHY_PAGE_SIZE,
+      count: publicMetas.length,
+      elapsedMs: Date.now() - started,
+      metas: publicMetas
+    });
   } catch (e) { next(e); }
 });
 
