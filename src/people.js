@@ -71,23 +71,34 @@ function creditToVideo(item, index) {
   const name = item.title || item.name || item.original_title || item.original_name || 'Bez názvu';
   const released = item.release_date || item.first_air_date || null;
   const role = item.character || item.job || null;
-  const overview = [role ? `${item.character ? 'Postava' : 'Úloha'}: ${role}` : null, item.overview || null]
-    .filter(Boolean)
-    .join('\n\n');
+  const overview = [
+    role ? `${item.character ? 'Postava' : 'Úloha'}: ${role}` : null,
+    item.overview || null
+  ].filter(Boolean).join('\n\n');
 
   return {
-    id: `tmdb:${type}:${item.id}`,
-    name,
+    id: `person-credit:${type}:${item.id}`,
+    name: `${type === 'movie' ? '🎬' : '📺'} ${name}`,
     title: name,
     released: released || undefined,
-    thumbnail: imageUrl(item.backdrop_path || item.poster_path, 'w500'),
+    thumbnail: imageUrl(item.backdrop_path || item.poster_path, 'w780'),
     overview: overview || undefined,
     description: overview || undefined,
     rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
       ? Number(item.vote_average).toFixed(1)
       : undefined,
+    season: 1,
+    episode: index + 1,
+    number: index + 1,
     available: true,
-    number: index + 1
+    streams: [
+      {
+        name: 'Nuvio',
+        title: 'Otvoriť detail',
+        description: `${type === 'movie' ? 'Film' : 'Seriál'} • ${name}`,
+        externalUrl: `nuvio://tmdb/${type}/${item.id}`
+      }
+    ]
   };
 }
 
@@ -111,7 +122,7 @@ export async function getPersonMeta(rawId) {
     counts.directingSeries ? `Seriály (réžia): ${counts.directingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('V sekcii obsadenie klikni na kartu osoby „Otvoriť filmografiu“ pre natívny Nuvio profil s filmami a seriálmi.');
+  lines.push('Filmografia je nižšie v zozname. Otvor titul a zvoľ „Otvoriť detail“; Nuvio ťa presmeruje na jeho normálny filmový alebo seriálový detail.');
 
   const filmography = uniqueCredits(credits)
     .slice(0, 60)
@@ -122,7 +133,10 @@ export async function getPersonMeta(rawId) {
 
   return {
     id: `person:${person.id}`,
-    type: 'person',
+    // Nuvio only renders a selectable video/episode rail for standard media types.
+    // Returning the person profile as a synthetic series keeps the People search card,
+    // but lets the detail screen render the person's credits as selectable entries.
+    type: 'series',
     name: personName,
     poster: personPhoto,
     background: imageUrl(person.profile_path, 'h632'),
@@ -130,16 +144,6 @@ export async function getPersonMeta(rawId) {
     description: lines.join('\n\n'),
     releaseInfo: person.birthday || undefined,
     genres: roles,
-    app_extras: {
-      cast: [
-        {
-          name: personName,
-          character: 'Otvoriť filmografiu',
-          photo: personPhoto,
-          tmdbId: person.id
-        }
-      ]
-    },
     videos: filmography,
     links: [
       { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
