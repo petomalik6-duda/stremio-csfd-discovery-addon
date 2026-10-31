@@ -1,4 +1,4 @@
-import { imageUrl, personCredits, personDetails, resolveTmdbItemToStremioMeta, searchPerson } from './tmdb.js';
+import { imageUrl, personCredits, personDetails, searchPerson } from './tmdb.js';
 
 function normalize(value = '') {
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -69,68 +69,6 @@ function countCredits(credits) {
   };
 }
 
-async function mapLimited(items, concurrency, mapper) {
-  const out = new Array(items.length);
-  let index = 0;
-  async function worker() {
-    while (true) {
-      const i = index++;
-      if (i >= items.length) return;
-      try { out[i] = await mapper(items[i], i); }
-      catch (error) {
-        console.warn('[people-filmography-resolver]', error.message);
-        out[i] = null;
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return out.filter(Boolean);
-}
-
-async function nestedMovieFilmography(credits, limit = 60) {
-  const movies = uniqueCredits(credits)
-    .filter(item => item.media_type === 'movie')
-    .slice(0, limit);
-
-  // Keep the original TMDB credit beside the resolved Stremio meta so we can
-  // preserve the exact release date and the portrait poster artwork.
-  const resolved = await mapLimited(movies, 10, async item => ({
-    source: item,
-    meta: await resolveTmdbItemToStremioMeta(item, 'movie')
-  }));
-
-  // Resolve requests finish out of order, so sort once more by the exact TMDB
-  // release date. Missing dates are intentionally placed last.
-  resolved.sort((a, b) => {
-    const dateDiff = creditDate(b.source) - creditDate(a.source);
-    if (dateDiff !== 0) return dateDiff;
-    return (b.source.popularity || 0) - (a.source.popularity || 0);
-  });
-
-  return resolved.map(({ source, meta }, index) => {
-    const exactDate = source.release_date || null;
-    const year = exactDate ? exactDate.slice(0, 4) : meta.releaseInfo;
-    return {
-      // IMPORTANT: this is the real movie ID (preferably IMDb tt...), not a synthetic
-      // person-credit ID. Because the parent meta below reports type=movie, NuvioTV
-      // asks every installed stream addon for /stream/movie/<real-id>.
-      id: meta.id,
-      name: `🎬 ${meta.name}${year ? ` (${year})` : ''}`,
-      title: meta.name,
-      released: exactDate ? `${exactDate}T00:00:00.000Z` : undefined,
-      // Use the portrait TMDB poster rather than the landscape backdrop.
-      thumbnail: meta.poster || meta.background || undefined,
-      overview: meta.description || undefined,
-      description: meta.description || undefined,
-      rating: meta.imdbRating || undefined,
-      season: 1,
-      episode: index + 1,
-      number: index + 1,
-      available: true
-    };
-  });
-}
-
 export async function getPersonMeta(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return null;
@@ -153,18 +91,14 @@ export async function getPersonMeta(rawId) {
     counts.writingSeries ? `Seriály (scenár): ${counts.writingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Vnorená filmografia nižšie obsahuje filmy s reálnymi IMDb/TMDB identitami, plagátmi a zoradením od najnovšieho po najstarší. Po otvorení filmu Nuvio načíta zdroje zo všetkých nainštalovaných stream addonov. Seriály otvor cez katalóg „📺 Filmografia – seriály“, aby Nuvio zobrazilo normálny detail so sezónami a epizódami.');
+  lines.push('Filmografiu nájdeš vo vyhľadávaní v katalógoch „🎬 Filmografia osoby – filmy“ a „📺 Filmografia osoby – seriály“. Oba sú zoradené od najnovšieho po najstarší titul.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
-  const videos = await nestedMovieFilmography(credits);
 
   return {
     id: `person:${person.id}`,
-    // NuvioTV sends the parent meta type when it asks stream addons for an item
-    // inside videos[]. Using movie here makes nested filmography requests standard
-    // movie stream requests instead of the broken person/series requests.
-    type: 'movie',
+    type: 'person',
     name: personName,
     poster: personPhoto,
     background: imageUrl(person.profile_path, 'h632'),
@@ -172,7 +106,6 @@ export async function getPersonMeta(rawId) {
     description: lines.join('\n\n'),
     releaseInfo: person.birthday || undefined,
     genres: roles,
-    videos,
     links: [
       { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
     ],
@@ -184,10 +117,7 @@ export async function getPersonMeta(rawId) {
       birthday: person.birthday || null,
       deathday: person.deathday || null,
       creditCounts: counts,
-      nestedMovieFilmography: true,
-      streamCompatibleMovieIds: true,
-      nestedMovieSort: 'release_date_desc',
-      nestedMovieArtwork: 'poster'
+      filmographyCatalogsOnly: true
     }
   };
 }
