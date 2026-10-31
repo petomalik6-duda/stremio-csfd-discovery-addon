@@ -6,7 +6,7 @@ import { getMetaById, toPublicMeta } from './src/meta.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.0.1';
+const ADDON_VERSION = process.env.npm_package_version || '1.0.2';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -71,8 +71,11 @@ async function catalogResponse(type, id, extra = {}) {
   const q = String(extra.search || '').trim();
 
   if (q) {
-    const rows = await searchDiscovery(q, type, 80);
-    return { metas: rows.slice(skip, skip + 40).map(toPublicMeta) };
+    const started = Date.now();
+    const rows = await searchDiscovery(q, type, 20);
+    const page = rows.slice(skip, skip + 20).map(toPublicMeta);
+    console.log(`[search] type=${type} q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
+    return { metas: page };
   }
 
   const rows = await getDiscoveryCatalog(type, id, extra);
@@ -91,7 +94,7 @@ app.get('/', (_req, res) => {
 <li><a href="/stats">stats</a></li>
 <li><a href="/debug/search?type=movie&q=Tom%20Hanks">debug: Tom Hanks</a></li>
 </ul>
-<p>Príklady: <code>Tom Hanks</code>, <code>herec: Brad Pitt</code>, <code>režisér: Christopher Nolan</code>.</p>
+<p>Príklady: <code>Tom Hanks</code>, <code>herec: Brad Pitt</code>, <code>režisér: Christopher Nolan</code>, <code>scenárista: Aaron Sorkin</code>.</p>
 </body></html>`);
 });
 
@@ -133,8 +136,10 @@ app.get('/debug/search', async (req, res, next) => {
   try {
     const type = req.query.type === 'series' ? 'series' : 'movie';
     const q = String(req.query.q || '').trim();
+    const started = Date.now();
     const metas = q ? await searchDiscovery(q, type, 20) : [];
-    res.json({ ok: true, type, q, count: metas.length, metas: metas.map(toPublicMeta) });
+    console.log(`[debug-search] type=${type} q=${JSON.stringify(q)} count=${metas.length} ms=${Date.now() - started}`);
+    res.json({ ok: true, type, q, count: metas.length, elapsedMs: Date.now() - started, metas: metas.map(toPublicMeta) });
   } catch (e) { next(e); }
 });
 
