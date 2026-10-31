@@ -13,7 +13,7 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.3.2';
+const ADDON_VERSION = process.env.npm_package_version || '1.3.4';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -37,8 +37,8 @@ const filmographySearchExtra = [
 
 const catalogs = [
   { type: 'person', id: 'csfd-people', name: '👤 People – herci, režiséri a tvorcovia', extra: peopleSearchExtra },
-  { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia – filmy', extra: filmographySearchExtra },
-  { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia – seriály', extra: filmographySearchExtra },
+  { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia osoby – filmy', extra: filmographySearchExtra },
+  { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia osoby – seriály', extra: filmographySearchExtra },
   { type: 'movie', id: 'csfd-popular-movies', name: '🔥 Discovery – Populárne filmy', extra: searchableBrowseExtra },
   { type: 'movie', id: 'csfd-top-movies', name: '⭐ Discovery – Najlepšie hodnotené filmy', extra: browseExtra },
   { type: 'movie', id: 'csfd-new-movies', name: '🆕 Discovery – Nové filmy', extra: browseExtra },
@@ -53,7 +53,7 @@ const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD Discovery – filmy, seriály a tvorcovia',
-  description: 'People vyhľadávanie, vnorená filmová filmografia so štandardnými IMDb/TMDB ID pre stream addony a samostatná filmografia filmov/seriálov.',
+  description: 'People vyhľadávanie a samostatná filmografia filmov a seriálov. Filmografické katalógy používajú štandardné TMDB/IMDb identity a sú zoradené od najnovšieho po najstarší titul.',
   resources: [
     'catalog',
     { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
@@ -69,13 +69,13 @@ const manifest = {
       idPrefix: 'person:',
       tmdbPersonIdHint: 'behaviorHints.tmdbPersonId',
       detailEndpoint: '/people/{id}.json',
-      creditsEndpoint: '/people/{id}/credits.json',
-      nestedMovieStreams: true
+      creditsEndpoint: '/people/{id}/credits.json'
     },
     filmography: {
       movieCatalogId: 'csfd-person-movies',
       seriesCatalogId: 'csfd-person-series',
-      standardMediaIds: true
+      standardMediaIds: true,
+      sort: 'release_date_desc'
     }
   }
 };
@@ -121,7 +121,7 @@ async function catalogResponse(type, id, extra = {}) {
     const started = Date.now();
     const rows = await searchFilmography(q, type, 20);
     const page = rows.slice(skip, skip + 20).map(toPublicMeta);
-    console.log(`[filmography-search] type=${type} q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
+    console.log(`[filmography-search] type=${type} q=${JSON.stringify(q)} count=${page.length} sort=newest-first ms=${Date.now() - started}`);
     return { metas: page };
   }
 
@@ -142,7 +142,7 @@ app.get('/', (_req, res) => {
 <html lang="sk"><head><meta charset="utf-8"><title>ČSFD Discovery</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px">
 <h1>ČSFD Discovery – Stremio/Nuvio addon</h1>
-<p>Vyhľadáva filmy, seriály a osoby. People detail obsahuje vnorené filmy s reálnymi media ID; seriálová filmografia ostáva v samostatnom katalógu.</p>
+<p>Vyhľadáva filmy, seriály a osoby. Filmografia osoby je v samostatných movie/series katalógoch, zoradených od najnovšieho po najstarší titul.</p>
 <ul>
 <li><a href="/manifest.json">manifest.json</a></li>
 <li><a href="/health">health</a></li>
@@ -170,8 +170,7 @@ app.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
 
 app.get('/meta/:type/:id.json', async (req, res, next) => {
   try {
-    const isPersonProfile = String(req.params.id).startsWith('person:') &&
-      ['person', 'movie', 'series'].includes(req.params.type);
+    const isPersonProfile = String(req.params.id).startsWith('person:') && req.params.type === 'person';
     if (isPersonProfile) {
       return res.json({ meta: await getPersonMeta(req.params.id) });
     }
@@ -212,9 +211,9 @@ app.get('/health', async (_req, res) => {
     tmdbConfigured: configured,
     tmdb,
     peopleEnabled: true,
-    nestedMovieFilmographyStreams: true,
     personFilmographyCatalogs: true,
     standardFilmographyMediaIds: true,
+    filmographyNewestFirst: true,
     at: new Date().toISOString()
   });
 });
@@ -224,9 +223,9 @@ app.get('/stats', (_req, res) => res.json({
   cache: cacheStats(),
   catalogs: catalogs.length,
   peopleEnabled: true,
-  nestedMovieFilmographyStreams: true,
   personFilmographyCatalogs: true,
-  standardFilmographyMediaIds: true
+  standardFilmographyMediaIds: true,
+  filmographyNewestFirst: true
 }));
 
 app.get('/debug/people', async (req, res, next) => {
@@ -245,7 +244,7 @@ app.get('/debug/filmography', async (req, res, next) => {
     const q = String(req.query.q || '').trim();
     const started = Date.now();
     const metas = q ? await searchFilmography(q, type, 20) : [];
-    console.log(`[debug-filmography] type=${type} q=${JSON.stringify(q)} count=${metas.length} ms=${Date.now() - started}`);
+    console.log(`[debug-filmography] type=${type} q=${JSON.stringify(q)} count=${metas.length} sort=newest-first ms=${Date.now() - started}`);
     res.json({ ok: true, type, q, count: metas.length, elapsedMs: Date.now() - started, metas: metas.map(toPublicMeta) });
   } catch (e) { next(e); }
 });
