@@ -52,12 +52,12 @@ async function personSearch(query, role, type, limit, offset=0) {
 }
 async function titleSearch(query,type,limit){const effectiveLimit=Math.min(Math.max(1,limit||20),20);const titles=(await searchTitles(query,type)).slice(0,effectiveLimit);return mapLimited(titles,12,item=>resolveTmdbItemToStremioMeta(item,type));}
 
-export async function searchFilmography(rawQuery,type,limit=null,offset=0){
+export async function searchFilmography(rawQuery,type,_limit=null,_offset=0){
   const parsed=stripPrefix(rawQuery); if(!parsed.query)return [];
-  // Default filmography is acting-only. With limit=null the complete TMDB combined cast filmography is returned in one response,
-  // because Nuvio currently does not request skip pages for search-based catalogs.
+  // Nuvio does not paginate search catalogs reliably. Intentionally ignore caller limit/offset and
+  // return the complete acting filmography in one response. Explicit director/writer prefixes remain supported.
   const role = parsed.role === 'auto' || parsed.role === 'person' ? 'actor' : parsed.role;
-  return personSearch(parsed.query,role,type,limit,offset);
+  return personSearch(parsed.query,role,type,null,0);
 }
 export async function searchTitlesDiscovery(rawQuery,type,limit=20){const parsed=stripPrefix(rawQuery);if(!parsed.query)return [];return titleSearch(parsed.query,type,limit);}
 export async function searchDiscovery(rawQuery,type,limit=20){const parsed=stripPrefix(rawQuery);if(!parsed.query)return [];if(parsed.role!=='auto')return personSearch(parsed.query,parsed.role,type,limit);const [people,titles]=await Promise.all([searchPerson(parsed.query),searchTitles(parsed.query,type)]);const pm=bestPersonMatch(people,parsed.query);if(pm?.strong){const r=await personSearch(parsed.query,'actor',type,limit);if(r.length)return r;}if(titles.length)return titleSearch(parsed.query,type,limit);if(people.length)return personSearch(parsed.query,'actor',type,limit);return [];}
