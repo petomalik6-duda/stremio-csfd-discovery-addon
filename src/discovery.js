@@ -27,15 +27,15 @@ function creditDate(c) { return Date.parse((c.media_type === 'tv' ? c.first_air_
 function pickPersonCredits(credits, role, type) {
   const rows = [];
   if (role === 'actor' || role === 'person' || role === 'auto') for (const c of credits.cast || []) if (creditMatchesType(c, type)) rows.push(c);
-  if (role === 'director' || role === 'person' || role === 'auto') for (const c of credits.crew || []) if (creditMatchesType(c, type) && c.job === 'Director') rows.push(c);
-  if (role === 'writer' || role === 'person' || role === 'auto') for (const c of credits.crew || []) if (creditMatchesType(c, type) && ['Writer', 'Screenplay', 'Story'].includes(c.job)) rows.push(c);
+  if (role === 'director') for (const c of credits.crew || []) if (creditMatchesType(c, type) && c.job === 'Director') rows.push(c);
+  if (role === 'writer') for (const c of credits.crew || []) if (creditMatchesType(c, type) && ['Writer', 'Screenplay', 'Story'].includes(c.job)) rows.push(c);
   const map = new Map(); for (const row of rows) if (!map.has(`${row.media_type}:${row.id}`)) map.set(`${row.media_type}:${row.id}`, row);
   return [...map.values()].sort((a,b) => creditDate(b)-creditDate(a) || (b.popularity||0)-(a.popularity||0));
 }
 async function mapLimited(items, limit, mapper) {
   const out = new Array(items.length); let index = 0;
   async function worker(){ while(true){ const i=index++; if(i>=items.length)return; try{out[i]=await mapper(items[i],i);}catch(e){console.warn('[resolver]',e.message);out[i]=null;} } }
-  await Promise.all(Array.from({length:Math.min(limit,items.length)},worker)); return out.filter(Boolean);
+  await Promise.all(Array.from({length:Math.min(limit,items.length || 1)},worker)); return out.filter(Boolean);
 }
 function bestPersonMatch(people, query) {
   if(!people?.length)return null; const q=normalize(query); const exact=people.find(p=>normalize(p.name)===q); if(exact)return {person:exact,strong:true};
@@ -44,16 +44,18 @@ function bestPersonMatch(people, query) {
 }
 async function personSearch(query, role, type, limit, offset=0) {
   const people=await searchPerson(query); if(!people.length)return []; const person=(bestPersonMatch(people,query)?.person)||people[0]; const credits=await personCredits(person.id);
-  const effectiveLimit=Math.min(Math.max(1,Number(limit)||20),50), effectiveOffset=Math.max(0,Number(offset)||0);
-  const selected=pickPersonCredits(credits,role,type).slice(effectiveOffset,effectiveOffset+effectiveLimit);
+  const all=pickPersonCredits(credits,role,type);
+  const effectiveOffset=Math.max(0,Number(offset)||0);
+  const requested=Number(limit);
+  const selected=Number.isFinite(requested) && requested > 0 ? all.slice(effectiveOffset,effectiveOffset+requested) : all.slice(effectiveOffset);
   return mapLimited(selected,12,item=>resolveTmdbItemToStremioMeta(item,type));
 }
 async function titleSearch(query,type,limit){const effectiveLimit=Math.min(Math.max(1,limit||20),20);const titles=(await searchTitles(query,type)).slice(0,effectiveLimit);return mapLimited(titles,12,item=>resolveTmdbItemToStremioMeta(item,type));}
 
-export async function searchFilmography(rawQuery,type,limit=20,offset=0){
+export async function searchFilmography(rawQuery,type,limit=null,offset=0){
   const parsed=stripPrefix(rawQuery); if(!parsed.query)return [];
-  // Filmography rows are acting filmography. Crew/director/writer credits must not leak into actor filmography.
-  // Explicit role prefixes remain supported for debug/special searches.
+  // Default filmography is acting-only. With limit=null the complete TMDB combined cast filmography is returned in one response,
+  // because Nuvio currently does not request skip pages for search-based catalogs.
   const role = parsed.role === 'auto' || parsed.role === 'person' ? 'actor' : parsed.role;
   return personSearch(parsed.query,role,type,limit,offset);
 }
