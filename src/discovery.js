@@ -1,24 +1,24 @@
 import { discover, personCredits, resolveTmdbItemToStremioMeta, searchPerson, searchTitles } from './tmdb.js';
 
 const GENRES = {
-  Akční: 28,
-  Dobrodružný: 12,
-  Animovaný: 16,
-  Komedie: 35,
-  Krimi: 80,
-  Dokumentární: 99,
-  Drama: 18,
-  Rodinný: 10751,
-  Fantasy: 14,
-  Historický: 36,
-  Horor: 27,
-  Hudební: 10402,
-  Mysteriózní: 9648,
-  Romantický: 10749,
-  'Sci-Fi': 878,
-  Thriller: 53,
-  Válečný: 10752,
-  Western: 37
+  Akční: { movie: 28, series: 10759 },
+  Dobrodružný: { movie: 12, series: 10759 },
+  Animovaný: { movie: 16, series: 16 },
+  Komedie: { movie: 35, series: 35 },
+  Krimi: { movie: 80, series: 80 },
+  Dokumentární: { movie: 99, series: 99 },
+  Drama: { movie: 18, series: 18 },
+  Rodinný: { movie: 10751, series: 10751 },
+  Fantasy: { movie: 14, series: 10765 },
+  Historický: { movie: 36, series: 18 },
+  Horor: { movie: 27, series: 9648 },
+  Hudební: { movie: 10402, series: 10767 },
+  Mysteriózní: { movie: 9648, series: 9648 },
+  Romantický: { movie: 10749, series: 18 },
+  'Sci-Fi': { movie: 878, series: 10765 },
+  Thriller: { movie: 53, series: 9648 },
+  Válečný: { movie: 10752, series: 10768 },
+  Western: { movie: 37, series: 37 }
 };
 
 export const genreNames = Object.keys(GENRES);
@@ -83,15 +83,15 @@ async function personSearch(query, role, type, limit) {
   const person = exact || people[0];
   const credits = await personCredits(person.id);
   const selected = pickPersonCredits(credits, role, type).slice(0, limit);
-  return mapLimited(selected, 5, item => resolveTmdbItemToStremioMeta(item, type));
+  return mapLimited(selected, 8, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
 async function titleSearch(query, type, limit) {
   const titles = (await searchTitles(query, type)).slice(0, limit);
-  return mapLimited(titles, 5, item => resolveTmdbItemToStremioMeta(item, type));
+  return mapLimited(titles, 8, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
-export async function searchDiscovery(rawQuery, type, limit = 40) {
+export async function searchDiscovery(rawQuery, type, limit = 80) {
   const parsed = stripPrefix(rawQuery);
   if (!parsed.query) return [];
 
@@ -113,25 +113,30 @@ export async function searchDiscovery(rawQuery, type, limit = 40) {
   return [];
 }
 
+async function loadFivePages(type, opts) {
+  const pages = await Promise.all([0, 1, 2, 3, 4].map(i => discover(type, { ...opts, page: opts.page + i })));
+  return pages.flat();
+}
+
 export async function getDiscoveryCatalog(type, catalogId, extra = {}) {
   const skip = Math.max(0, Number(extra.skip || 0));
-  const page = Math.floor(skip / 20) + 1;
+  const stremioPage = Math.floor(skip / 100);
+  const tmdbStartPage = stremioPage * 5 + 1;
   const mode = catalogId.includes('top') ? 'top' : catalogId.includes('new') ? 'new' : 'popular';
-  const genreId = extra.genre && GENRES[extra.genre] ? GENRES[extra.genre] : null;
+  const genreId = extra.genre && GENRES[extra.genre] ? GENRES[extra.genre][type] : null;
 
   let rows;
   if (catalogId.includes('czsk')) {
     const [cs, sk] = await Promise.all([
-      discover(type, { mode, genreId, page, language: 'cs' }),
-      discover(type, { mode, genreId, page, language: 'sk' })
+      loadFivePages(type, { mode, genreId, page: tmdbStartPage, language: 'cs' }),
+      loadFivePages(type, { mode, genreId, page: tmdbStartPage, language: 'sk' })
     ]);
     const map = new Map([...cs, ...sk].map(x => [x.id, x]));
     rows = [...map.values()].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
   } else {
-    rows = await discover(type, { mode, genreId, page });
+    rows = await loadFivePages(type, { mode, genreId, page: tmdbStartPage });
   }
 
-  const offset = skip % 20;
-  const selected = rows.slice(offset, offset + 20);
-  return mapLimited(selected, 5, item => resolveTmdbItemToStremioMeta(item, type));
+  const selected = rows.slice(0, 100);
+  return mapLimited(selected, 10, item => resolveTmdbItemToStremioMeta(item, type));
 }
