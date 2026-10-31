@@ -1,7 +1,7 @@
 {
   "name": "stremio-csfd-discovery-addon",
-  "version": "1.4.4",
-  "description": "Nuvio/Stremio People addon with stronger typo-tolerant fuzzy person-name matching, acting filmography, documentaries/shorts, documentary series, and separate director/producer movie and series catalogs using standard TMDB/IMDb identities.",
+  "version": "1.4.5",
+  "description": "Nuvio/Stremio People addon with surname-anchored typo-tolerant person matching, acting filmography, documentaries/shorts, documentary series, and separate director/producer movie and series catalogs using standard TMDB/IMDb identities.",
   "type": "module",
   "main": "server.js",
   "scripts": {"start":"node server.js","dev":"node --watch server.js","test":"node scripts/smoke-test.js"},
