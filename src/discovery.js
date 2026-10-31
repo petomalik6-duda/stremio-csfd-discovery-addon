@@ -26,8 +26,9 @@ export const genreNames = Object.keys(GENRES);
 function stripPrefix(query = '') {
   const raw = String(query).trim();
   const patterns = [
-    { re: /^(herec|herečka|actor|actress)\s*:\s*/i, role: 'actor' },
-    { re: /^(režisér|reziser|director)\s*:\s*/i, role: 'director' },
+    { re: /^(herec|herečka|herecka|actor|actress)\s*:\s*/i, role: 'actor' },
+    { re: /^(režisér|reziser|režiser|director)\s*:\s*/i, role: 'director' },
+    { re: /^(scenárista|scenarista|writer)\s*:\s*/i, role: 'writer' },
     { re: /^(osoba|person)\s*:\s*/i, role: 'person' }
   ];
   for (const p of patterns) {
@@ -37,7 +38,13 @@ function stripPrefix(query = '') {
 }
 
 function normalize(s = '') {
-  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  return String(s)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
 }
 
 function creditMatchesType(c, type) {
@@ -52,6 +59,11 @@ function pickPersonCredits(credits, role, type) {
   if (role === 'director' || role === 'person' || role === 'auto') {
     for (const c of credits.crew || []) {
       if (creditMatchesType(c, type) && c.job === 'Director') rows.push(c);
+    }
+  }
+  if (role === 'writer' || role === 'person' || role === 'auto') {
+    for (const c of credits.crew || []) {
+      if (creditMatchesType(c, type) && ['Writer', 'Screenplay', 'Story'].includes(c.job)) rows.push(c);
     }
   }
   const map = new Map();
@@ -76,22 +88,40 @@ async function mapLimited(items, limit, mapper) {
   return out.filter(Boolean);
 }
 
+function bestPersonMatch(people, query) {
+  if (!people?.length) return null;
+  const q = normalize(query);
+  const exact = people.find(p => normalize(p.name) === q);
+  if (exact) return { person: exact, strong: true };
+
+  const top = people[0];
+  const n = normalize(top.name);
+  const qParts = q.split(' ').filter(Boolean);
+  const nParts = n.split(' ').filter(Boolean);
+  const common = qParts.filter(x => nParts.includes(x)).length;
+  const overlap = qParts.length ? common / qParts.length : 0;
+  const strong = (q.length >= 4 && (n.includes(q) || q.includes(n))) || overlap >= 0.75;
+  return { person: top, strong };
+}
+
 async function personSearch(query, role, type, limit) {
   const people = await searchPerson(query);
   if (!people.length) return [];
-  const exact = people.find(p => normalize(p.name) === normalize(query));
-  const person = exact || people[0];
+  const match = bestPersonMatch(people, query);
+  const person = match?.person || people[0];
   const credits = await personCredits(person.id);
-  const selected = pickPersonCredits(credits, role, type).slice(0, limit);
-  return mapLimited(selected, 8, item => resolveTmdbItemToStremioMeta(item, type));
+  const effectiveLimit = Math.min(Math.max(1, limit || 20), 20);
+  const selected = pickPersonCredits(credits, role, type).slice(0, effectiveLimit);
+  return mapLimited(selected, 12, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
 async function titleSearch(query, type, limit) {
-  const titles = (await searchTitles(query, type)).slice(0, limit);
-  return mapLimited(titles, 8, item => resolveTmdbItemToStremioMeta(item, type));
+  const effectiveLimit = Math.min(Math.max(1, limit || 20), 20);
+  const titles = (await searchTitles(query, type)).slice(0, effectiveLimit);
+  return mapLimited(titles, 12, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
-export async function searchDiscovery(rawQuery, type, limit = 80) {
+export async function searchDiscovery(rawQuery, type, limit = 20) {
   const parsed = stripPrefix(rawQuery);
   if (!parsed.query) return [];
 
@@ -102,8 +132,8 @@ export async function searchDiscovery(rawQuery, type, limit = 80) {
     searchTitles(parsed.query, type)
   ]);
 
-  const exactPerson = people.find(p => normalize(p.name) === normalize(parsed.query));
-  if (exactPerson) {
+  const personMatch = bestPersonMatch(people, parsed.query);
+  if (personMatch?.strong) {
     const personResults = await personSearch(parsed.query, 'auto', type, limit);
     if (personResults.length) return personResults;
   }
