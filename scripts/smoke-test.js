@@ -25,16 +25,30 @@ try {
   const health = await waitForHealth();
   assert.equal(health.ok, true);
   assert.equal(health.tmdbConfigured, false);
+  assert.equal(health.peopleEnabled, true);
 
   const manifestRes = await fetch(`http://127.0.0.1:${port}/manifest.json`);
   assert.equal(manifestRes.ok, true);
   const manifest = await manifestRes.json();
   assert.equal(manifest.id, 'cz.csfd.discovery.v1');
+  assert.equal(manifest.version, '1.1.0');
   assert.ok(Array.isArray(manifest.catalogs));
-  assert.ok(manifest.catalogs.some(c => c.extra?.some(e => e.name === 'search' && e.isRequired === true)));
-  assert.ok(manifest.resources.some(r => typeof r === 'object' && r.name === 'meta'));
+  assert.ok(manifest.types.includes('person'));
 
-  console.log('Smoke test passed:', { catalogs: manifest.catalogs.length, addon: manifest.name });
+  const peopleCatalog = manifest.catalogs.find(c => c.type === 'person' && c.id === 'csfd-people');
+  assert.ok(peopleCatalog);
+  assert.ok(peopleCatalog.extra?.some(e => e.name === 'search' && e.isRequired === true));
+
+  const metaResource = manifest.resources.find(r => typeof r === 'object' && r.name === 'meta');
+  assert.ok(metaResource);
+  assert.ok(metaResource.types.includes('person'));
+  assert.ok(metaResource.idPrefixes.includes('person:'));
+
+  console.log('Smoke test passed:', {
+    catalogs: manifest.catalogs.length,
+    addon: manifest.name,
+    peopleCatalog: peopleCatalog.name
+  });
 } finally {
   child.kill('SIGTERM');
 }

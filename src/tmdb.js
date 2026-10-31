@@ -47,6 +47,10 @@ export async function searchPerson(query) {
   return data.results || [];
 }
 
+export async function personDetails(personId) {
+  return tmdb(`/person/${personId}`, { language: 'cs-CZ', append_to_response: 'external_ids,images' }, 24 * 60 * 60 * 1000);
+}
+
 export async function searchTitles(query, type) {
   const endpoint = type === 'series' ? '/search/tv' : '/search/movie';
   const data = await tmdb(endpoint, { query, language: 'cs-CZ', include_adult: false }, 30 * 60 * 1000);

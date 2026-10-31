@@ -3,10 +3,11 @@ import express from 'express';
 import { cacheStats } from './src/cache.js';
 import { genreNames, getDiscoveryCatalog, searchDiscovery } from './src/discovery.js';
 import { getMetaById, toPublicMeta } from './src/meta.js';
+import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.0.2';
+const ADDON_VERSION = process.env.npm_package_version || '1.1.0';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -19,8 +20,13 @@ const browseExtra = [
   { name: 'genre', isRequired: false, options: genreNames },
   { name: 'skip', isRequired: false }
 ];
+const peopleSearchExtra = [
+  { name: 'search', isRequired: true },
+  { name: 'skip', isRequired: false }
+];
 
 const catalogs = [
+  { type: 'person', id: 'csfd-people', name: '👤 People – herci, režiséri a tvorcovia', extra: peopleSearchExtra },
   { type: 'movie', id: 'csfd-popular-movies', name: '🔥 Discovery – Populárne filmy', extra: searchableBrowseExtra },
   { type: 'movie', id: 'csfd-top-movies', name: '⭐ Discovery – Najlepšie hodnotené filmy', extra: browseExtra },
   { type: 'movie', id: 'csfd-new-movies', name: '🆕 Discovery – Nové filmy', extra: browseExtra },
@@ -35,12 +41,25 @@ const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD Discovery – filmy, seriály a tvorcovia',
-  description: 'Vyhľadávanie filmov a seriálov podľa názvu, herca alebo režiséra. TMDB/IMDb matching pre kompatibilitu so stream add-onmi a ČSFD obohatenie detailu.',
-  resources: ['catalog', 'meta'],
-  types: ['movie', 'series'],
+  description: 'Vyhľadávanie filmov, seriálov a People podľa názvu, herca alebo režiséra. TMDB/IMDb matching pre kompatibilitu so stream add-onmi a ČSFD obohatenie detailu.',
+  resources: [
+    'catalog',
+    { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
+  ],
+  types: ['movie', 'series', 'person'],
   catalogs,
-  idPrefixes: ['tt', 'tmdb:'],
-  behaviorHints: { configurable: false, configurationRequired: false }
+  idPrefixes: ['tt', 'tmdb:', 'person:'],
+  behaviorHints: { configurable: false, configurationRequired: false },
+  nuvio: {
+    people: {
+      enabled: true,
+      catalogId: 'csfd-people',
+      idPrefix: 'person:',
+      tmdbPersonIdHint: 'behaviorHints.tmdbPersonId',
+      detailEndpoint: '/people/{id}.json',
+      creditsEndpoint: '/people/{id}/credits.json'
+    }
+  }
 };
 
 app.use((req, res, next) => {
@@ -70,6 +89,15 @@ async function catalogResponse(type, id, extra = {}) {
   const skip = Math.max(0, Number(extra.skip || 0));
   const q = String(extra.search || '').trim();
 
+  if (type === 'person') {
+    if (!q) return { metas: [] };
+    const started = Date.now();
+    const rows = await searchPeople(q, 20);
+    const page = rows.slice(skip, skip + 20);
+    console.log(`[people-search] q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
+    return { metas: page };
+  }
+
   if (q) {
     const started = Date.now();
     const rows = await searchDiscovery(q, type, 20);
@@ -87,14 +115,15 @@ app.get('/', (_req, res) => {
 <html lang="sk"><head><meta charset="utf-8"><title>ČSFD Discovery</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px">
 <h1>ČSFD Discovery – Stremio/Nuvio addon</h1>
-<p>Vyhľadáva filmy/seriály podľa názvu, herca a režiséra. Výsledky sa mapujú na IMDb ID a detail sa obohacuje z ČSFD.</p>
+<p>Vyhľadáva filmy, seriály a osoby. People výsledky používajú samostatný typ <code>person</code> s TMDB person ID a detailom osoby.</p>
 <ul>
 <li><a href="/manifest.json">manifest.json</a></li>
 <li><a href="/health">health</a></li>
 <li><a href="/stats">stats</a></li>
-<li><a href="/debug/search?type=movie&q=Tom%20Hanks">debug: Tom Hanks</a></li>
+<li><a href="/debug/people?q=Brad%20Pitt">debug People: Brad Pitt</a></li>
+<li><a href="/debug/search?type=movie&q=Tom%20Hanks">debug filmy: Tom Hanks</a></li>
 </ul>
-<p>Príklady: <code>Tom Hanks</code>, <code>herec: Brad Pitt</code>, <code>režisér: Christopher Nolan</code>, <code>scenárista: Aaron Sorkin</code>.</p>
+<p>Príklady: <code>Brad Pitt</code>, <code>Tom Hanks</code>, <code>Christopher Nolan</code>, <code>Denis Villeneuve</code>.</p>
 </body></html>`);
 });
 
@@ -112,8 +141,33 @@ app.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
 
 app.get('/meta/:type/:id.json', async (req, res, next) => {
   try {
+    if (req.params.type === 'person') {
+      return res.json({ meta: await getPersonMeta(req.params.id) });
+    }
     if (!['movie', 'series'].includes(req.params.type)) return res.json({ meta: null });
     res.json({ meta: await getMetaById(req.params.type, req.params.id) });
+  } catch (e) { next(e); }
+});
+
+app.get('/people/search.json', async (req, res, next) => {
+  try {
+    const q = String(req.query.search || req.query.q || '').trim();
+    const people = q ? await searchPeople(q, 20) : [];
+    res.json({ people });
+  } catch (e) { next(e); }
+});
+
+app.get('/people/:id.json', async (req, res, next) => {
+  try {
+    const meta = await getPersonMeta(req.params.id);
+    res.json({ person: meta });
+  } catch (e) { next(e); }
+});
+
+app.get('/people/:id/credits.json', async (req, res, next) => {
+  try {
+    const credits = await getPersonCredits(req.params.id);
+    res.json({ personId: String(req.params.id).replace(/^person:/, ''), credits });
   } catch (e) { next(e); }
 });
 
@@ -121,16 +175,27 @@ app.get('/health', async (_req, res) => {
   const configured = Boolean(process.env.TMDB_API_KEY || process.env.TMDB_READ_ACCESS_TOKEN);
   const tmdb = configured ? await probeTmdb() : { ok: false, message: 'TMDB credentials are not configured' };
   res.json({
-    ok: tmdb.ok,
+    ok: true,
     addon: manifest.name,
     version: ADDON_VERSION,
     tmdbConfigured: configured,
     tmdb,
+    peopleEnabled: true,
     at: new Date().toISOString()
   });
 });
 
-app.get('/stats', (_req, res) => res.json({ ok: true, cache: cacheStats(), catalogs: catalogs.length }));
+app.get('/stats', (_req, res) => res.json({ ok: true, cache: cacheStats(), catalogs: catalogs.length, peopleEnabled: true }));
+
+app.get('/debug/people', async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const started = Date.now();
+    const people = q ? await searchPeople(q, 20) : [];
+    console.log(`[debug-people] q=${JSON.stringify(q)} count=${people.length} ms=${Date.now() - started}`);
+    res.json({ ok: true, q, count: people.length, elapsedMs: Date.now() - started, people });
+  } catch (e) { next(e); }
+});
 
 app.get('/debug/search', async (req, res, next) => {
   try {
