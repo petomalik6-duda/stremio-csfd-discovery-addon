@@ -1,7 +1,7 @@
 {
   "name": "stremio-csfd-discovery-addon",
-  "version": "1.1.2",
-  "description": "Stremio/Nuvio discovery addon with People search, person filmography bridge, person/director/actor discovery, TMDB/IMDb matching and CSFD metadata enrichment.",
+  "version": "1.2.0",
+  "description": "Stremio/Nuvio discovery addon with People search, addon-only person filmography navigation, person/director/actor discovery, TMDB/IMDb matching and CSFD metadata enrichment.",
   "type": "module",
   "main": "server.js",
   "scripts": {
