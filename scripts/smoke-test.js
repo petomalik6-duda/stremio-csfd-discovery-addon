@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
+const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const port = 19123;
 const child = spawn(process.execPath, ['server.js'], {
   env: { ...process.env, PORT: String(port), TMDB_API_KEY: '', TMDB_READ_ACCESS_TOKEN: '' },
@@ -31,7 +33,7 @@ try {
   assert.equal(manifestRes.ok, true);
   const manifest = await manifestRes.json();
   assert.equal(manifest.id, 'cz.csfd.discovery.v1');
-  assert.equal(manifest.version, '1.1.0');
+  assert.equal(manifest.version, pkg.version);
   assert.ok(Array.isArray(manifest.catalogs));
   assert.ok(manifest.types.includes('person'));
 
@@ -45,6 +47,7 @@ try {
   assert.ok(metaResource.idPrefixes.includes('person:'));
 
   console.log('Smoke test passed:', {
+    version: manifest.version,
     catalogs: manifest.catalogs.length,
     addon: manifest.name,
     peopleCatalog: peopleCatalog.name
