@@ -7,7 +7,7 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.1.0';
+const ADDON_VERSION = process.env.npm_package_version || '1.2.0';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -141,7 +141,9 @@ app.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
 
 app.get('/meta/:type/:id.json', async (req, res, next) => {
   try {
-    if (req.params.type === 'person') {
+    const isPersonProfile = String(req.params.id).startsWith('person:') &&
+      (req.params.type === 'person' || req.params.type === 'series');
+    if (isPersonProfile) {
       return res.json({ meta: await getPersonMeta(req.params.id) });
     }
     if (!['movie', 'series'].includes(req.params.type)) return res.json({ meta: null });
