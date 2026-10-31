@@ -13,7 +13,7 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.3.0';
+const ADDON_VERSION = process.env.npm_package_version || '1.3.2';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -53,7 +53,7 @@ const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD Discovery – filmy, seriály a tvorcovia',
-  description: 'People vyhľadávanie a samostatná filmografia ako normálne movie/series katalógy. Tituly používajú štandardné TMDB/IMDb identity, aby fungovali so všetkými bežnými stream add-onmi.',
+  description: 'People vyhľadávanie, vnorená filmová filmografia so štandardnými IMDb/TMDB ID pre stream addony a samostatná filmografia filmov/seriálov.',
   resources: [
     'catalog',
     { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
@@ -69,7 +69,8 @@ const manifest = {
       idPrefix: 'person:',
       tmdbPersonIdHint: 'behaviorHints.tmdbPersonId',
       detailEndpoint: '/people/{id}.json',
-      creditsEndpoint: '/people/{id}/credits.json'
+      creditsEndpoint: '/people/{id}/credits.json',
+      nestedMovieStreams: true
     },
     filmography: {
       movieCatalogId: 'csfd-person-movies',
@@ -141,7 +142,7 @@ app.get('/', (_req, res) => {
 <html lang="sk"><head><meta charset="utf-8"><title>ČSFD Discovery</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px">
 <h1>ČSFD Discovery – Stremio/Nuvio addon</h1>
-<p>Vyhľadáva filmy, seriály a osoby. Filmografia osoby sa zobrazuje v samostatných movie/series katalógoch so štandardnými identitami titulov.</p>
+<p>Vyhľadáva filmy, seriály a osoby. People detail obsahuje vnorené filmy s reálnymi media ID; seriálová filmografia ostáva v samostatnom katalógu.</p>
 <ul>
 <li><a href="/manifest.json">manifest.json</a></li>
 <li><a href="/health">health</a></li>
@@ -170,7 +171,7 @@ app.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
 app.get('/meta/:type/:id.json', async (req, res, next) => {
   try {
     const isPersonProfile = String(req.params.id).startsWith('person:') &&
-      (req.params.type === 'person' || req.params.type === 'series');
+      ['person', 'movie', 'series'].includes(req.params.type);
     if (isPersonProfile) {
       return res.json({ meta: await getPersonMeta(req.params.id) });
     }
@@ -211,6 +212,7 @@ app.get('/health', async (_req, res) => {
     tmdbConfigured: configured,
     tmdb,
     peopleEnabled: true,
+    nestedMovieFilmographyStreams: true,
     personFilmographyCatalogs: true,
     standardFilmographyMediaIds: true,
     at: new Date().toISOString()
@@ -222,6 +224,7 @@ app.get('/stats', (_req, res) => res.json({
   cache: cacheStats(),
   catalogs: catalogs.length,
   peopleEnabled: true,
+  nestedMovieFilmographyStreams: true,
   personFilmographyCatalogs: true,
   standardFilmographyMediaIds: true
 }));
