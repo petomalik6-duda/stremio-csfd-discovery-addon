@@ -30,7 +30,10 @@ async function resolvePersonFilmography(query,role,type){const people=await sear
 export async function searchFilmography(rawQuery,type,category='main'){
   const parsed=stripPrefix(rawQuery);if(!parsed.query)return[];const role=parsed.role==='auto'||parsed.role==='person'?'actor':parsed.role;
   const all=await resolvePersonFilmography(parsed.query,role,type);
-  if(type==='series')return all;
+  if(type==='series'){
+    if(category==='special')return all.filter(m=>isDocumentary(m));
+    return all.filter(m=>!isDocumentary(m));
+  }
   if(category==='special')return all.filter(m=>isDocumentary(m)||isShort(m));
   return all.filter(m=>!isDocumentary(m)&&!isShort(m));
 }
