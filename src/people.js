@@ -76,9 +76,6 @@ function creditToVideo(item, index) {
     .join('\n\n');
 
   return {
-    // For Nuvio's generic "other" detail these unnumbered videos are rendered as
-    // one virtual filmography rail/section. The ID keeps the underlying TMDB title
-    // identity so a future Nuvio native-person redirect can reuse it directly.
     id: `tmdb:${type}:${item.id}`,
     name,
     title: name,
@@ -114,25 +111,35 @@ export async function getPersonMeta(rawId) {
     counts.directingSeries ? `Seriály (réžia): ${counts.directingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
+  lines.push('V sekcii obsadenie klikni na kartu osoby „Otvoriť filmografiu“ pre natívny Nuvio profil s filmami a seriálmi.');
 
-  // Nuvio's generic detail supports unnumbered `videos` for non-standard content
-  // types by presenting them as one virtual section. Use that capability as an
-  // addon-only filmography fallback until Nuvio routes `person:*` directly to its
-  // native CastDetailScreen.
   const filmography = uniqueCredits(credits)
     .slice(0, 60)
     .map(creditToVideo);
 
+  const personName = person.name || 'Neznáma osoba';
+  const personPhoto = imageUrl(person.profile_path, 'w500');
+
   return {
     id: `person:${person.id}`,
     type: 'person',
-    name: person.name || 'Neznáma osoba',
-    poster: imageUrl(person.profile_path, 'w500'),
+    name: personName,
+    poster: personPhoto,
     background: imageUrl(person.profile_path, 'h632'),
     posterShape: 'poster',
     description: lines.join('\n\n'),
     releaseInfo: person.birthday || undefined,
     genres: roles,
+    app_extras: {
+      cast: [
+        {
+          name: personName,
+          character: 'Otvoriť filmografiu',
+          photo: personPhoto,
+          tmdbId: person.id
+        }
+      ]
+    },
     videos: filmography,
     links: [
       { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
