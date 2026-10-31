@@ -113,14 +113,16 @@ function bestPersonMatch(people, query) {
   return { person: top, strong };
 }
 
-async function personSearch(query, role, type, limit) {
+async function personSearch(query, role, type, limit, offset = 0) {
   const people = await searchPerson(query);
   if (!people.length) return [];
   const match = bestPersonMatch(people, query);
   const person = match?.person || people[0];
   const credits = await personCredits(person.id);
-  const effectiveLimit = Math.min(Math.max(1, limit || 20), 20);
-  const selected = pickPersonCredits(credits, role, type).slice(0, effectiveLimit);
+  const effectiveLimit = Math.min(Math.max(1, Number(limit) || 20), 50);
+  const effectiveOffset = Math.max(0, Number(offset) || 0);
+  const selected = pickPersonCredits(credits, role, type)
+    .slice(effectiveOffset, effectiveOffset + effectiveLimit);
   return mapLimited(selected, 12, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
@@ -130,11 +132,11 @@ async function titleSearch(query, type, limit) {
   return mapLimited(titles, 12, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
-export async function searchFilmography(rawQuery, type, limit = 20) {
+export async function searchFilmography(rawQuery, type, limit = 20, offset = 0) {
   const parsed = stripPrefix(rawQuery);
   if (!parsed.query) return [];
   const role = parsed.role === 'auto' ? 'person' : parsed.role;
-  return personSearch(parsed.query, role, type, limit);
+  return personSearch(parsed.query, role, type, limit, offset);
 }
 
 export async function searchTitlesDiscovery(rawQuery, type, limit = 20) {
