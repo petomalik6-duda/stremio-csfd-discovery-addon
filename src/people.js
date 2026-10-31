@@ -33,6 +33,10 @@ export async function searchPeople(query, limit = 20) {
   return [...exact, ...rest].slice(0, limit).map(personSearchMeta);
 }
 
+function creditDate(item) {
+  return Date.parse(item.release_date || item.first_air_date || '') || 0;
+}
+
 function uniqueCredits(credits) {
   const seen = new Set();
   return [...(credits.cast || []), ...(credits.crew || [])]
@@ -44,9 +48,8 @@ function uniqueCredits(credits) {
       return true;
     })
     .sort((a, b) => {
-      const dateA = Date.parse(a.release_date || a.first_air_date || '') || 0;
-      const dateB = Date.parse(b.release_date || b.first_air_date || '') || 0;
-      if (dateA !== dateB) return dateB - dateA;
+      const dateDiff = creditDate(b) - creditDate(a);
+      if (dateDiff !== 0) return dateDiff;
       return (b.popularity || 0) - (a.popularity || 0);
     });
 }
@@ -89,25 +92,43 @@ async function nestedMovieFilmography(credits, limit = 60) {
     .filter(item => item.media_type === 'movie')
     .slice(0, limit);
 
-  const resolved = await mapLimited(movies, 10, item => resolveTmdbItemToStremioMeta(item, 'movie'));
-
-  return resolved.map((meta, index) => ({
-    // IMPORTANT: this is the real movie ID (preferably IMDb tt...), not a synthetic
-    // person-credit ID. Because the parent meta below reports type=movie, NuvioTV
-    // asks every installed stream addon for /stream/movie/<real-id>.
-    id: meta.id,
-    name: `🎬 ${meta.name}`,
-    title: meta.name,
-    released: meta.releaseInfo ? `${meta.releaseInfo}-01-01T00:00:00.000Z` : undefined,
-    thumbnail: meta.background || meta.poster || undefined,
-    overview: meta.description || undefined,
-    description: meta.description || undefined,
-    rating: meta.imdbRating || undefined,
-    season: 1,
-    episode: index + 1,
-    number: index + 1,
-    available: true
+  // Keep the original TMDB credit beside the resolved Stremio meta so we can
+  // preserve the exact release date and the portrait poster artwork.
+  const resolved = await mapLimited(movies, 10, async item => ({
+    source: item,
+    meta: await resolveTmdbItemToStremioMeta(item, 'movie')
   }));
+
+  // Resolve requests finish out of order, so sort once more by the exact TMDB
+  // release date. Missing dates are intentionally placed last.
+  resolved.sort((a, b) => {
+    const dateDiff = creditDate(b.source) - creditDate(a.source);
+    if (dateDiff !== 0) return dateDiff;
+    return (b.source.popularity || 0) - (a.source.popularity || 0);
+  });
+
+  return resolved.map(({ source, meta }, index) => {
+    const exactDate = source.release_date || null;
+    const year = exactDate ? exactDate.slice(0, 4) : meta.releaseInfo;
+    return {
+      // IMPORTANT: this is the real movie ID (preferably IMDb tt...), not a synthetic
+      // person-credit ID. Because the parent meta below reports type=movie, NuvioTV
+      // asks every installed stream addon for /stream/movie/<real-id>.
+      id: meta.id,
+      name: `🎬 ${meta.name}${year ? ` (${year})` : ''}`,
+      title: meta.name,
+      released: exactDate ? `${exactDate}T00:00:00.000Z` : undefined,
+      // Use the portrait TMDB poster rather than the landscape backdrop.
+      thumbnail: meta.poster || meta.background || undefined,
+      overview: meta.description || undefined,
+      description: meta.description || undefined,
+      rating: meta.imdbRating || undefined,
+      season: 1,
+      episode: index + 1,
+      number: index + 1,
+      available: true
+    };
+  });
 }
 
 export async function getPersonMeta(rawId) {
@@ -132,7 +153,7 @@ export async function getPersonMeta(rawId) {
     counts.writingSeries ? `Seriály (scenár): ${counts.writingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Vnorená filmografia nižšie obsahuje filmy s reálnymi IMDb/TMDB identitami. Po otvorení filmu Nuvio načíta zdroje zo všetkých nainštalovaných stream addonov. Seriály otvor cez katalóg „📺 Filmografia – seriály“, aby Nuvio zobrazilo normálny detail so sezónami a epizódami.');
+  lines.push('Vnorená filmografia nižšie obsahuje filmy s reálnymi IMDb/TMDB identitami, plagátmi a zoradením od najnovšieho po najstarší. Po otvorení filmu Nuvio načíta zdroje zo všetkých nainštalovaných stream addonov. Seriály otvor cez katalóg „📺 Filmografia – seriály“, aby Nuvio zobrazilo normálny detail so sezónami a epizódami.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
@@ -164,7 +185,9 @@ export async function getPersonMeta(rawId) {
       deathday: person.deathday || null,
       creditCounts: counts,
       nestedMovieFilmography: true,
-      streamCompatibleMovieIds: true
+      streamCompatibleMovieIds: true,
+      nestedMovieSort: 'release_date_desc',
+      nestedMovieArtwork: 'poster'
     }
   };
 }
