@@ -1,4 +1,4 @@
-import { imageUrl, personCredits, personDetails, searchPerson } from './tmdb.js';
+import { imageUrl, personCredits, personDetails, resolveTmdbItemToStremioMeta, searchPerson } from './tmdb.js';
 
 function normalize(value = '') {
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
@@ -66,51 +66,48 @@ function countCredits(credits) {
   };
 }
 
-function nestedFilmography(credits, limit = 80) {
-  let movieEpisode = 0;
-  let seriesEpisode = 0;
+async function mapLimited(items, concurrency, mapper) {
+  const out = new Array(items.length);
+  let index = 0;
+  async function worker() {
+    while (true) {
+      const i = index++;
+      if (i >= items.length) return;
+      try { out[i] = await mapper(items[i], i); }
+      catch (error) {
+        console.warn('[people-filmography-resolver]', error.message);
+        out[i] = null;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return out.filter(Boolean);
+}
 
-  return uniqueCredits(credits)
-    .slice(0, limit)
-    .map(item => {
-      const type = item.media_type === 'tv' ? 'series' : 'movie';
-      const isMovie = type === 'movie';
-      const name = item.title || item.name || item.original_title || item.original_name || 'Bez názvu';
-      const released = item.release_date || item.first_air_date || null;
-      const role = item.character || item.job || null;
-      const episode = isMovie ? ++movieEpisode : ++seriesEpisode;
-      const overview = [
-        role ? `${item.character ? 'Postava' : 'Úloha'}: ${role}` : null,
-        item.overview || null
-      ].filter(Boolean).join('\n\n');
+async function nestedMovieFilmography(credits, limit = 60) {
+  const movies = uniqueCredits(credits)
+    .filter(item => item.media_type === 'movie')
+    .slice(0, limit);
 
-      return {
-        id: `filmography:${type}:${item.id}`,
-        name: `${isMovie ? '🎬' : '📺'} ${name}`,
-        title: name,
-        released: released || undefined,
-        thumbnail: imageUrl(item.backdrop_path || item.poster_path, 'w780'),
-        overview: overview || undefined,
-        description: overview || undefined,
-        rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
-          ? Number(item.vote_average).toFixed(1)
-          : undefined,
-        // NuvioTV treats any meta with videos as series-like. Season 1 is movies,
-        // season 2 is TV, which keeps the nested People filmography easy to browse.
-        season: isMovie ? 1 : 2,
-        episode,
-        number: episode,
-        available: true,
-        streams: [
-          {
-            name: 'Filmografia',
-            title: '▶ Otvoriť normálny detail a všetky zdroje',
-            description: `Otvorí ${isMovie ? 'film' : 'seriál'} v bežnom Nuvio detaile, kde sa načítajú všetky nainštalované stream addony.`,
-            externalUrl: `nuvio://tmdb/${type}/${item.id}`
-          }
-        ]
-      };
-    });
+  const resolved = await mapLimited(movies, 10, item => resolveTmdbItemToStremioMeta(item, 'movie'));
+
+  return resolved.map((meta, index) => ({
+    // IMPORTANT: this is the real movie ID (preferably IMDb tt...), not a synthetic
+    // person-credit ID. Because the parent meta below reports type=movie, NuvioTV
+    // asks every installed stream addon for /stream/movie/<real-id>.
+    id: meta.id,
+    name: `🎬 ${meta.name}`,
+    title: meta.name,
+    released: meta.releaseInfo ? `${meta.releaseInfo}-01-01T00:00:00.000Z` : undefined,
+    thumbnail: meta.background || meta.poster || undefined,
+    overview: meta.description || undefined,
+    description: meta.description || undefined,
+    rating: meta.imdbRating || undefined,
+    season: 1,
+    episode: index + 1,
+    number: index + 1,
+    available: true
+  }));
 }
 
 export async function getPersonMeta(rawId) {
@@ -135,15 +132,18 @@ export async function getPersonMeta(rawId) {
     counts.writingSeries ? `Seriály (scenár): ${counts.writingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Vnorená filmografia je nižšie: sezóna 1 = filmy, sezóna 2 = seriály. Pri titule vyber „▶ Otvoriť normálny detail a všetky zdroje“. Pre priamy prístup ostávajú aj katalógy „🎬 Filmografia – filmy“ a „📺 Filmografia – seriály“.');
+  lines.push('Vnorená filmografia nižšie obsahuje filmy s reálnymi IMDb/TMDB identitami. Po otvorení filmu Nuvio načíta zdroje zo všetkých nainštalovaných stream addonov. Seriály otvor cez katalóg „📺 Filmografia – seriály“, aby Nuvio zobrazilo normálny detail so sezónami a epizódami.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
-  const videos = nestedFilmography(credits);
+  const videos = await nestedMovieFilmography(credits);
 
   return {
     id: `person:${person.id}`,
-    type: 'person',
+    // NuvioTV sends the parent meta type when it asks stream addons for an item
+    // inside videos[]. Using movie here makes nested filmography requests standard
+    // movie stream requests instead of the broken person/series requests.
+    type: 'movie',
     name: personName,
     poster: personPhoto,
     background: imageUrl(person.profile_path, 'h632'),
@@ -163,8 +163,8 @@ export async function getPersonMeta(rawId) {
       birthday: person.birthday || null,
       deathday: person.deathday || null,
       creditCounts: counts,
-      nestedFilmography: true,
-      nestedFilmographySeasons: { movies: 1, series: 2 }
+      nestedMovieFilmography: true,
+      streamCompatibleMovieIds: true
     }
   };
 }
