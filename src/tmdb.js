@@ -27,6 +27,17 @@ async function tmdb(path, params = {}, ttlMs = 10 * 60 * 1000) {
   });
 }
 
+export async function probeTmdb() {
+  try {
+    await tmdb('/configuration', {}, 5 * 60 * 1000);
+    return { ok: true };
+  } catch (error) {
+    const status = error.response?.status || null;
+    const message = error.response?.data?.status_message || error.message || 'TMDB request failed';
+    return { ok: false, status, message };
+  }
+}
+
 export function imageUrl(path, size = 'w500') {
   return path ? `${IMAGE_BASE}/${size}${path}` : null;
 }
