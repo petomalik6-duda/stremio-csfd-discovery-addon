@@ -66,36 +66,6 @@ function countCredits(credits) {
   };
 }
 
-function creditToVideo(item, index) {
-  const type = item.media_type === 'tv' ? 'series' : 'movie';
-  const name = item.title || item.name || item.original_title || item.original_name || 'Bez názvu';
-  const released = item.release_date || item.first_air_date || null;
-  const role = item.character || item.job || null;
-  const overview = [
-    role ? `${item.character ? 'Postava' : 'Úloha'}: ${role}` : null,
-    item.overview || null
-  ].filter(Boolean).join('\n\n');
-
-  return {
-    // Nuvio still treats the profile as a synthetic series, but compatible stream
-    // addons can recover the real media type + TMDB id from this bridge id.
-    id: `person-credit:${type}:${item.id}`,
-    name: `${type === 'movie' ? '🎬' : '📺'} ${name}`,
-    title: name,
-    released: released || undefined,
-    thumbnail: imageUrl(item.backdrop_path || item.poster_path, 'w780'),
-    overview: overview || undefined,
-    description: overview || undefined,
-    rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
-      ? Number(item.vote_average).toFixed(1)
-      : undefined,
-    season: 1,
-    episode: index + 1,
-    number: index + 1,
-    available: true
-  };
-}
-
 export async function getPersonMeta(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return null;
@@ -113,23 +83,19 @@ export async function getPersonMeta(rawId) {
     counts.actingMovies ? `Filmy (herectvo): ${counts.actingMovies}` : null,
     counts.actingSeries ? `Seriály (herectvo): ${counts.actingSeries}` : null,
     counts.directingMovies ? `Filmy (réžia): ${counts.directingMovies}` : null,
-    counts.directingSeries ? `Seriály (réžia): ${counts.directingSeries}` : null
+    counts.directingSeries ? `Seriály (réžia): ${counts.directingSeries}` : null,
+    counts.writingMovies ? `Filmy (scenár): ${counts.writingMovies}` : null,
+    counts.writingSeries ? `Seriály (scenár): ${counts.writingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Filmografia je nižšie v zozname. Kompatibilné zdrojové addony načítajú streamy priamo pre vybraný film alebo seriál; Discovery pridáva aj fallback na normálny Nuvio detail.');
-
-  const filmography = uniqueCredits(credits)
-    .slice(0, 60)
-    .map(creditToVideo);
+  lines.push('Filmografiu nájdeš priamo vo vyhľadávaní v katalógoch „🎬 Filmografia – filmy“ a „📺 Filmografia – seriály“.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
 
   return {
     id: `person:${person.id}`,
-    // Nuvio renders selectable videos only for regular media types, so the person
-    // profile is exposed as a synthetic series and the credits become its entries.
-    type: 'series',
+    type: 'person',
     name: personName,
     poster: personPhoto,
     background: imageUrl(person.profile_path, 'h632'),
@@ -137,7 +103,6 @@ export async function getPersonMeta(rawId) {
     description: lines.join('\n\n'),
     releaseInfo: person.birthday || undefined,
     genres: roles,
-    videos: filmography,
     links: [
       { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
     ],
