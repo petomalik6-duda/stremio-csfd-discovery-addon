@@ -33,6 +33,24 @@ export async function searchPeople(query, limit = 20) {
   return [...exact, ...rest].slice(0, limit).map(personSearchMeta);
 }
 
+function uniqueCredits(credits) {
+  const seen = new Set();
+  return [...(credits.cast || []), ...(credits.crew || [])]
+    .filter(item => item.media_type === 'movie' || item.media_type === 'tv')
+    .filter(item => {
+      const key = `${item.media_type}:${item.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = Date.parse(a.release_date || a.first_air_date || '') || 0;
+      const dateB = Date.parse(b.release_date || b.first_air_date || '') || 0;
+      if (dateA !== dateB) return dateB - dateA;
+      return (b.popularity || 0) - (a.popularity || 0);
+    });
+}
+
 function countCredits(credits) {
   const unique = list => new Set(list.map(item => `${item.media_type}:${item.id}`)).size;
   const acting = credits.cast || [];
@@ -45,6 +63,34 @@ function countCredits(credits) {
     directingSeries: unique(directing.filter(x => x.media_type === 'tv')),
     writingMovies: unique(writing.filter(x => x.media_type === 'movie')),
     writingSeries: unique(writing.filter(x => x.media_type === 'tv'))
+  };
+}
+
+function creditToVideo(item, index) {
+  const type = item.media_type === 'tv' ? 'series' : 'movie';
+  const name = item.title || item.name || item.original_title || item.original_name || 'Bez názvu';
+  const released = item.release_date || item.first_air_date || null;
+  const role = item.character || item.job || null;
+  const overview = [role ? `${item.character ? 'Postava' : 'Úloha'}: ${role}` : null, item.overview || null]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return {
+    // For Nuvio's generic "other" detail these unnumbered videos are rendered as
+    // one virtual filmography rail/section. The ID keeps the underlying TMDB title
+    // identity so a future Nuvio native-person redirect can reuse it directly.
+    id: `tmdb:${type}:${item.id}`,
+    name,
+    title: name,
+    released: released || undefined,
+    thumbnail: imageUrl(item.backdrop_path || item.poster_path, 'w500'),
+    overview: overview || undefined,
+    description: overview || undefined,
+    rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
+      ? Number(item.vote_average).toFixed(1)
+      : undefined,
+    available: true,
+    number: index + 1
   };
 }
 
@@ -69,6 +115,14 @@ export async function getPersonMeta(rawId) {
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
 
+  // Nuvio's generic detail supports unnumbered `videos` for non-standard content
+  // types by presenting them as one virtual section. Use that capability as an
+  // addon-only filmography fallback until Nuvio routes `person:*` directly to its
+  // native CastDetailScreen.
+  const filmography = uniqueCredits(credits)
+    .slice(0, 60)
+    .map(creditToVideo);
+
   return {
     id: `person:${person.id}`,
     type: 'person',
@@ -79,6 +133,7 @@ export async function getPersonMeta(rawId) {
     description: lines.join('\n\n'),
     releaseInfo: person.birthday || undefined,
     genres: roles,
+    videos: filmography,
     links: [
       { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
     ],
@@ -98,22 +153,13 @@ export async function getPersonCredits(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return [];
   const credits = await personCredits(id);
-  const seen = new Set();
-  const rows = [...(credits.cast || []), ...(credits.crew || [])]
-    .filter(item => item.media_type === 'movie' || item.media_type === 'tv')
-    .filter(item => {
-      const key = `${item.media_type}:${item.id}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
 
-  return rows.map(item => ({
+  return uniqueCredits(credits).map(item => ({
     tmdbId: item.id,
     type: item.media_type === 'tv' ? 'series' : 'movie',
     name: item.title || item.name || item.original_title || item.original_name || 'Bez názvu',
     poster: imageUrl(item.poster_path, 'w500'),
+    background: imageUrl(item.backdrop_path, 'w780'),
     year: String(item.release_date || item.first_air_date || '').slice(0, 4) || null,
     character: item.character || null,
     job: item.job || null,
