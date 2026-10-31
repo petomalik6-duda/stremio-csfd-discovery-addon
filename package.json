@@ -1,7 +1,7 @@
 {
   "name": "stremio-csfd-discovery-addon",
-  "version": "1.3.6",
-  "description": "Stremio/Nuvio discovery addon with People search and acting-only movie/series filmography catalogs using standard TMDB/IMDb identities, newest-first sorting, TMDB ratings, and 20-item pagination.",
+  "version": "1.3.7",
+  "description": "Stremio/Nuvio discovery addon with People search and complete acting-only movie/series filmography catalogs using standard TMDB/IMDb identities, newest-first sorting and TMDB ratings.",
   "type": "module",
   "main": "server.js",
   "scripts": {"start":"node server.js","dev":"node --watch server.js","test":"node scripts/smoke-test.js"},
