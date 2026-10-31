@@ -7,7 +7,7 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.2.0';
+const ADDON_VERSION = process.env.npm_package_version || '1.2.1';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -44,11 +44,12 @@ const manifest = {
   description: 'Vyhľadávanie filmov, seriálov a People podľa názvu, herca alebo režiséra. TMDB/IMDb matching pre kompatibilitu so stream add-onmi a ČSFD obohatenie detailu.',
   resources: [
     'catalog',
-    { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
+    { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] },
+    { name: 'stream', types: ['movie', 'series'], idPrefixes: ['person-credit:'] }
   ],
   types: ['movie', 'series', 'person'],
   catalogs,
-  idPrefixes: ['tt', 'tmdb:', 'person:'],
+  idPrefixes: ['tt', 'tmdb:', 'person:', 'person-credit:'],
   behaviorHints: { configurable: false, configurationRequired: false },
   nuvio: {
     people: {
@@ -78,6 +79,12 @@ function parseExtra(raw = '') {
     if (key) out[decodeURIComponent(key)] = decodeURIComponent(value.replace(/\+/g, ' '));
   }
   return out;
+}
+
+function parsePersonCreditId(rawId = '') {
+  const match = String(rawId).match(/^person-credit:(movie|series):(\d+)$/i);
+  if (!match) return null;
+  return { type: match[1].toLowerCase(), tmdbId: Number(match[2]) };
 }
 
 function knownCatalog(type, id) {
@@ -151,6 +158,23 @@ app.get('/meta/:type/:id.json', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+app.get('/stream/:type/:id.json', (req, res) => {
+  const target = parsePersonCreditId(req.params.id);
+  if (!target) return res.json({ streams: [] });
+  // Fallback only. Compatible source addons (FastShare/Webshare, SKTorrent, ...)
+  // can return real playable streams for the same person-credit id.
+  res.json({
+    streams: [
+      {
+        name: 'Discovery',
+        title: '↗ Otvoriť normálny detail',
+        description: `Otvoriť ${target.type === 'movie' ? 'film' : 'seriál'} v Nuvio a načítať všetky bežné zdroje`,
+        externalUrl: `nuvio://tmdb/${target.type}/${target.tmdbId}`
+      }
+    ]
+  });
+});
+
 app.get('/people/search.json', async (req, res, next) => {
   try {
     const q = String(req.query.search || req.query.q || '').trim();
@@ -183,11 +207,12 @@ app.get('/health', async (_req, res) => {
     tmdbConfigured: configured,
     tmdb,
     peopleEnabled: true,
+    peopleStreamBridge: true,
     at: new Date().toISOString()
   });
 });
 
-app.get('/stats', (_req, res) => res.json({ ok: true, cache: cacheStats(), catalogs: catalogs.length, peopleEnabled: true }));
+app.get('/stats', (_req, res) => res.json({ ok: true, cache: cacheStats(), catalogs: catalogs.length, peopleEnabled: true, peopleStreamBridge: true }));
 
 app.get('/debug/people', async (req, res, next) => {
   try {
