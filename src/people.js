@@ -77,6 +77,8 @@ function creditToVideo(item, index) {
   ].filter(Boolean).join('\n\n');
 
   return {
+    // Nuvio still treats the profile as a synthetic series, but compatible stream
+    // addons can recover the real media type + TMDB id from this bridge id.
     id: `person-credit:${type}:${item.id}`,
     name: `${type === 'movie' ? '🎬' : '📺'} ${name}`,
     title: name,
@@ -90,15 +92,7 @@ function creditToVideo(item, index) {
     season: 1,
     episode: index + 1,
     number: index + 1,
-    available: true,
-    streams: [
-      {
-        name: 'Nuvio',
-        title: 'Otvoriť detail',
-        description: `${type === 'movie' ? 'Film' : 'Seriál'} • ${name}`,
-        externalUrl: `nuvio://tmdb/${type}/${item.id}`
-      }
-    ]
+    available: true
   };
 }
 
@@ -122,7 +116,7 @@ export async function getPersonMeta(rawId) {
     counts.directingSeries ? `Seriály (réžia): ${counts.directingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Filmografia je nižšie v zozname. Otvor titul a zvoľ „Otvoriť detail“; Nuvio ťa presmeruje na jeho normálny filmový alebo seriálový detail.');
+  lines.push('Filmografia je nižšie v zozname. Kompatibilné zdrojové addony načítajú streamy priamo pre vybraný film alebo seriál; Discovery pridáva aj fallback na normálny Nuvio detail.');
 
   const filmography = uniqueCredits(credits)
     .slice(0, 60)
@@ -133,9 +127,8 @@ export async function getPersonMeta(rawId) {
 
   return {
     id: `person:${person.id}`,
-    // Nuvio only renders a selectable video/episode rail for standard media types.
-    // Returning the person profile as a synthetic series keeps the People search card,
-    // but lets the detail screen render the person's credits as selectable entries.
+    // Nuvio renders selectable videos only for regular media types, so the person
+    // profile is exposed as a synthetic series and the credits become its entries.
     type: 'series',
     name: personName,
     poster: personPhoto,
