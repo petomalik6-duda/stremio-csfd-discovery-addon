@@ -30,6 +30,9 @@ try {
   assert.equal(health.peopleEnabled, true);
   assert.equal(health.personFilmographyCatalogs, true);
   assert.equal(health.standardFilmographyMediaIds, true);
+  assert.equal(health.filmographyPagination, true);
+  assert.equal(health.filmographyPageSize, 20);
+  assert.equal(health.filmographyRatingSource, 'TMDB');
 
   const manifestRes = await fetch(`http://127.0.0.1:${port}/manifest.json`);
   assert.equal(manifestRes.ok, true);
@@ -47,8 +50,12 @@ try {
   const seriesFilmography = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-series');
   assert.ok(movieFilmography);
   assert.ok(seriesFilmography);
+  assert.equal(movieFilmography.pageSize, 20);
+  assert.equal(seriesFilmography.pageSize, 20);
   assert.ok(movieFilmography.extra?.some(e => e.name === 'search' && e.isRequired === true));
   assert.ok(seriesFilmography.extra?.some(e => e.name === 'search' && e.isRequired === true));
+  assert.ok(movieFilmography.extra?.some(e => e.name === 'skip'));
+  assert.ok(seriesFilmography.extra?.some(e => e.name === 'skip'));
 
   const metaResource = manifest.resources.find(r => typeof r === 'object' && r.name === 'meta');
   assert.ok(metaResource);
@@ -65,7 +72,9 @@ try {
     addon: manifest.name,
     peopleCatalog: peopleCatalog.name,
     movieFilmography: movieFilmography.name,
-    seriesFilmography: seriesFilmography.name
+    seriesFilmography: seriesFilmography.name,
+    filmographyPageSize: movieFilmography.pageSize,
+    filmographyRatingSource: health.filmographyRatingSource
   });
 } finally {
   child.kill('SIGTERM');
