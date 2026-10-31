@@ -3,29 +3,29 @@ import express from 'express';
 import { cacheStats } from './src/cache.js';
 import { genreNames, getDiscoveryCatalog, searchDiscovery } from './src/discovery.js';
 import { getMetaById, toPublicMeta } from './src/meta.js';
+import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.0.0';
+const ADDON_VERSION = process.env.npm_package_version || '1.0.1';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
-const searchExtra = [
-  { name: 'search', isRequired: true },
+const searchableBrowseExtra = [
+  { name: 'search', isRequired: false },
+  { name: 'genre', isRequired: false, options: genreNames },
   { name: 'skip', isRequired: false }
 ];
 const browseExtra = [
-  { name: 'skip', isRequired: false },
-  { name: 'genre', isRequired: false, options: genreNames }
+  { name: 'genre', isRequired: false, options: genreNames },
+  { name: 'skip', isRequired: false }
 ];
 
 const catalogs = [
-  { type: 'movie', id: 'csfd-search-movie', name: '🔎 ČSFD Discovery – Hľadať film / herca / režiséra', extra: searchExtra },
-  { type: 'series', id: 'csfd-search-series', name: '🔎 ČSFD Discovery – Hľadať seriál / herca / režiséra', extra: searchExtra },
-  { type: 'movie', id: 'csfd-popular-movies', name: '🔥 Discovery – Populárne filmy', extra: browseExtra },
+  { type: 'movie', id: 'csfd-popular-movies', name: '🔥 Discovery – Populárne filmy', extra: searchableBrowseExtra },
   { type: 'movie', id: 'csfd-top-movies', name: '⭐ Discovery – Najlepšie hodnotené filmy', extra: browseExtra },
   { type: 'movie', id: 'csfd-new-movies', name: '🆕 Discovery – Nové filmy', extra: browseExtra },
   { type: 'movie', id: 'csfd-czsk-movies', name: '🇨🇿🇸🇰 Discovery – CZ/SK filmy', extra: browseExtra },
-  { type: 'series', id: 'csfd-popular-series', name: '🔥 Discovery – Populárne seriály', extra: browseExtra },
+  { type: 'series', id: 'csfd-popular-series', name: '🔥 Discovery – Populárne seriály', extra: searchableBrowseExtra },
   { type: 'series', id: 'csfd-top-series', name: '⭐ Discovery – Najlepšie hodnotené seriály', extra: browseExtra },
   { type: 'series', id: 'csfd-new-series', name: '🆕 Discovery – Nové seriály', extra: browseExtra },
   { type: 'series', id: 'csfd-czsk-series', name: '🇨🇿🇸🇰 Discovery – CZ/SK seriály', extra: browseExtra }
@@ -36,14 +36,11 @@ const manifest = {
   version: ADDON_VERSION,
   name: 'ČSFD Discovery – filmy, seriály a tvorcovia',
   description: 'Vyhľadávanie filmov a seriálov podľa názvu, herca alebo režiséra. TMDB/IMDb matching pre kompatibilitu so stream add-onmi a ČSFD obohatenie detailu.',
-  resources: [
-    'catalog',
-    { name: 'meta', types: ['movie', 'series'], idPrefixes: ['tt', 'tmdb:'] }
-  ],
+  resources: ['catalog', 'meta'],
   types: ['movie', 'series'],
   catalogs,
   idPrefixes: ['tt', 'tmdb:'],
-  behaviorHints: { configurable: false }
+  behaviorHints: { configurable: false, configurationRequired: false }
 };
 
 app.use((req, res, next) => {
@@ -71,12 +68,11 @@ function knownCatalog(type, id) {
 async function catalogResponse(type, id, extra = {}) {
   if (!knownCatalog(type, id)) return { metas: [] };
   const skip = Math.max(0, Number(extra.skip || 0));
+  const q = String(extra.search || '').trim();
 
-  if (id === 'csfd-search-movie' || id === 'csfd-search-series') {
-    const q = String(extra.search || '').trim();
-    if (!q) return { metas: [] };
-    const rows = await searchDiscovery(q, type, 60);
-    return { metas: rows.slice(skip, skip + 20).map(toPublicMeta) };
+  if (q) {
+    const rows = await searchDiscovery(q, type, 80);
+    return { metas: rows.slice(skip, skip + 40).map(toPublicMeta) };
   }
 
   const rows = await getDiscoveryCatalog(type, id, extra);
@@ -87,7 +83,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
 <html lang="sk"><head><meta charset="utf-8"><title>ČSFD Discovery</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px">
-<h1>ČSFD Discovery – Stremio addon</h1>
+<h1>ČSFD Discovery – Stremio/Nuvio addon</h1>
 <p>Vyhľadáva filmy/seriály podľa názvu, herca a režiséra. Výsledky sa mapujú na IMDb ID a detail sa obohacuje z ČSFD.</p>
 <ul>
 <li><a href="/manifest.json">manifest.json</a></li>
@@ -118,12 +114,15 @@ app.get('/meta/:type/:id.json', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
+  const configured = Boolean(process.env.TMDB_API_KEY || process.env.TMDB_READ_ACCESS_TOKEN);
+  const tmdb = configured ? await probeTmdb() : { ok: false, message: 'TMDB credentials are not configured' };
   res.json({
-    ok: true,
+    ok: tmdb.ok,
     addon: manifest.name,
     version: ADDON_VERSION,
-    tmdbConfigured: Boolean(process.env.TMDB_API_KEY || process.env.TMDB_READ_ACCESS_TOKEN),
+    tmdbConfigured: configured,
+    tmdb,
     at: new Date().toISOString()
   });
 });
@@ -140,10 +139,15 @@ app.get('/debug/search', async (req, res, next) => {
 });
 
 app.use((err, req, res, _next) => {
-  console.error('[error]', req.method, req.originalUrl, err.stack || err.message);
-  res.status(500).json({ error: 'Addon request failed', detail: err.message });
+  const status = err.response?.status || 500;
+  const detail = err.response?.data?.status_message || err.message;
+  console.error('[error]', req.method, req.originalUrl, status, detail);
+  res.status(status >= 400 && status < 600 ? status : 500).json({ error: 'Addon request failed', detail });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`ČSFD Discovery v${ADDON_VERSION} listening on ${PORT}`);
+  const tmdb = await probeTmdb();
+  if (tmdb.ok) console.log('[tmdb] connectivity OK');
+  else console.error('[tmdb] connectivity FAILED', tmdb.status || '', tmdb.message);
 });
