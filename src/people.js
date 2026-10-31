@@ -66,6 +66,53 @@ function countCredits(credits) {
   };
 }
 
+function nestedFilmography(credits, limit = 80) {
+  let movieEpisode = 0;
+  let seriesEpisode = 0;
+
+  return uniqueCredits(credits)
+    .slice(0, limit)
+    .map(item => {
+      const type = item.media_type === 'tv' ? 'series' : 'movie';
+      const isMovie = type === 'movie';
+      const name = item.title || item.name || item.original_title || item.original_name || 'Bez názvu';
+      const released = item.release_date || item.first_air_date || null;
+      const role = item.character || item.job || null;
+      const episode = isMovie ? ++movieEpisode : ++seriesEpisode;
+      const overview = [
+        role ? `${item.character ? 'Postava' : 'Úloha'}: ${role}` : null,
+        item.overview || null
+      ].filter(Boolean).join('\n\n');
+
+      return {
+        id: `filmography:${type}:${item.id}`,
+        name: `${isMovie ? '🎬' : '📺'} ${name}`,
+        title: name,
+        released: released || undefined,
+        thumbnail: imageUrl(item.backdrop_path || item.poster_path, 'w780'),
+        overview: overview || undefined,
+        description: overview || undefined,
+        rating: Number.isFinite(Number(item.vote_average)) && Number(item.vote_average) > 0
+          ? Number(item.vote_average).toFixed(1)
+          : undefined,
+        // NuvioTV treats any meta with videos as series-like. Season 1 is movies,
+        // season 2 is TV, which keeps the nested People filmography easy to browse.
+        season: isMovie ? 1 : 2,
+        episode,
+        number: episode,
+        available: true,
+        streams: [
+          {
+            name: 'Filmografia',
+            title: '▶ Otvoriť normálny detail a všetky zdroje',
+            description: `Otvorí ${isMovie ? 'film' : 'seriál'} v bežnom Nuvio detaile, kde sa načítajú všetky nainštalované stream addony.`,
+            externalUrl: `nuvio://tmdb/${type}/${item.id}`
+          }
+        ]
+      };
+    });
+}
+
 export async function getPersonMeta(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return null;
@@ -88,10 +135,11 @@ export async function getPersonMeta(rawId) {
     counts.writingSeries ? `Seriály (scenár): ${counts.writingSeries}` : null
   ].filter(Boolean);
   if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Filmografiu nájdeš priamo vo vyhľadávaní v katalógoch „🎬 Filmografia – filmy“ a „📺 Filmografia – seriály“.');
+  lines.push('Vnorená filmografia je nižšie: sezóna 1 = filmy, sezóna 2 = seriály. Pri titule vyber „▶ Otvoriť normálny detail a všetky zdroje“. Pre priamy prístup ostávajú aj katalógy „🎬 Filmografia – filmy“ a „📺 Filmografia – seriály“.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
+  const videos = nestedFilmography(credits);
 
   return {
     id: `person:${person.id}`,
@@ -103,6 +151,7 @@ export async function getPersonMeta(rawId) {
     description: lines.join('\n\n'),
     releaseInfo: person.birthday || undefined,
     genres: roles,
+    videos,
     links: [
       { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
     ],
@@ -113,7 +162,9 @@ export async function getPersonMeta(rawId) {
       placeOfBirth: person.place_of_birth || null,
       birthday: person.birthday || null,
       deathday: person.deathday || null,
-      creditCounts: counts
+      creditCounts: counts,
+      nestedFilmography: true,
+      nestedFilmographySeasons: { movies: 1, series: 2 }
     }
   };
 }
