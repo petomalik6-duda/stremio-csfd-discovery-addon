@@ -121,6 +121,19 @@ async function titleSearch(query, type, limit) {
   return mapLimited(titles, 12, item => resolveTmdbItemToStremioMeta(item, type));
 }
 
+export async function searchFilmography(rawQuery, type, limit = 20) {
+  const parsed = stripPrefix(rawQuery);
+  if (!parsed.query) return [];
+  const role = parsed.role === 'auto' ? 'person' : parsed.role;
+  return personSearch(parsed.query, role, type, limit);
+}
+
+export async function searchTitlesDiscovery(rawQuery, type, limit = 20) {
+  const parsed = stripPrefix(rawQuery);
+  if (!parsed.query) return [];
+  return titleSearch(parsed.query, type, limit);
+}
+
 export async function searchDiscovery(rawQuery, type, limit = 20) {
   const parsed = stripPrefix(rawQuery);
   if (!parsed.query) return [];
