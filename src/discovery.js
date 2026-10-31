@@ -51,6 +51,11 @@ function creditMatchesType(c, type) {
   return type === 'series' ? c.media_type === 'tv' : c.media_type === 'movie';
 }
 
+function creditDate(c) {
+  const raw = c.media_type === 'tv' ? c.first_air_date : c.release_date;
+  return Date.parse(raw || '') || 0;
+}
+
 function pickPersonCredits(credits, role, type) {
   const rows = [];
   if (role === 'actor' || role === 'person' || role === 'auto') {
@@ -70,7 +75,11 @@ function pickPersonCredits(credits, role, type) {
   for (const row of rows) {
     if (!map.has(`${row.media_type}:${row.id}`)) map.set(`${row.media_type}:${row.id}`, row);
   }
-  return [...map.values()].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+  return [...map.values()].sort((a, b) => {
+    const dateDiff = creditDate(b) - creditDate(a);
+    if (dateDiff !== 0) return dateDiff;
+    return (b.popularity || 0) - (a.popularity || 0);
+  });
 }
 
 async function mapLimited(items, limit, mapper) {
