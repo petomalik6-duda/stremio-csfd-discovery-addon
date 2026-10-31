@@ -1,13 +1,19 @@
 import 'dotenv/config';
 import express from 'express';
 import { cacheStats } from './src/cache.js';
-import { genreNames, getDiscoveryCatalog, searchDiscovery } from './src/discovery.js';
+import {
+  genreNames,
+  getDiscoveryCatalog,
+  searchDiscovery,
+  searchFilmography,
+  searchTitlesDiscovery
+} from './src/discovery.js';
 import { getMetaById, toPublicMeta } from './src/meta.js';
 import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.2.1';
+const ADDON_VERSION = process.env.npm_package_version || '1.3.0';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const app = express();
 
@@ -24,9 +30,15 @@ const peopleSearchExtra = [
   { name: 'search', isRequired: true },
   { name: 'skip', isRequired: false }
 ];
+const filmographySearchExtra = [
+  { name: 'search', isRequired: true },
+  { name: 'skip', isRequired: false }
+];
 
 const catalogs = [
   { type: 'person', id: 'csfd-people', name: '👤 People – herci, režiséri a tvorcovia', extra: peopleSearchExtra },
+  { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia – filmy', extra: filmographySearchExtra },
+  { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia – seriály', extra: filmographySearchExtra },
   { type: 'movie', id: 'csfd-popular-movies', name: '🔥 Discovery – Populárne filmy', extra: searchableBrowseExtra },
   { type: 'movie', id: 'csfd-top-movies', name: '⭐ Discovery – Najlepšie hodnotené filmy', extra: browseExtra },
   { type: 'movie', id: 'csfd-new-movies', name: '🆕 Discovery – Nové filmy', extra: browseExtra },
@@ -41,15 +53,14 @@ const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD Discovery – filmy, seriály a tvorcovia',
-  description: 'Vyhľadávanie filmov, seriálov a People podľa názvu, herca alebo režiséra. TMDB/IMDb matching pre kompatibilitu so stream add-onmi a ČSFD obohatenie detailu.',
+  description: 'People vyhľadávanie a samostatná filmografia ako normálne movie/series katalógy. Tituly používajú štandardné TMDB/IMDb identity, aby fungovali so všetkými bežnými stream add-onmi.',
   resources: [
     'catalog',
-    { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] },
-    { name: 'stream', types: ['movie', 'series'], idPrefixes: ['person-credit:'] }
+    { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
   ],
   types: ['movie', 'series', 'person'],
   catalogs,
-  idPrefixes: ['tt', 'tmdb:', 'person:', 'person-credit:'],
+  idPrefixes: ['tt', 'tmdb:', 'person:'],
   behaviorHints: { configurable: false, configurationRequired: false },
   nuvio: {
     people: {
@@ -59,6 +70,11 @@ const manifest = {
       tmdbPersonIdHint: 'behaviorHints.tmdbPersonId',
       detailEndpoint: '/people/{id}.json',
       creditsEndpoint: '/people/{id}/credits.json'
+    },
+    filmography: {
+      movieCatalogId: 'csfd-person-movies',
+      seriesCatalogId: 'csfd-person-series',
+      standardMediaIds: true
     }
   }
 };
@@ -81,12 +97,6 @@ function parseExtra(raw = '') {
   return out;
 }
 
-function parsePersonCreditId(rawId = '') {
-  const match = String(rawId).match(/^person-credit:(movie|series):(\d+)$/i);
-  if (!match) return null;
-  return { type: match[1].toLowerCase(), tmdbId: Number(match[2]) };
-}
-
 function knownCatalog(type, id) {
   return catalogs.some(c => c.type === type && c.id === id);
 }
@@ -105,11 +115,20 @@ async function catalogResponse(type, id, extra = {}) {
     return { metas: page };
   }
 
+  if (id === 'csfd-person-movies' || id === 'csfd-person-series') {
+    if (!q) return { metas: [] };
+    const started = Date.now();
+    const rows = await searchFilmography(q, type, 20);
+    const page = rows.slice(skip, skip + 20).map(toPublicMeta);
+    console.log(`[filmography-search] type=${type} q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
+    return { metas: page };
+  }
+
   if (q) {
     const started = Date.now();
-    const rows = await searchDiscovery(q, type, 20);
+    const rows = await searchTitlesDiscovery(q, type, 20);
     const page = rows.slice(skip, skip + 20).map(toPublicMeta);
-    console.log(`[search] type=${type} q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
+    console.log(`[title-search] type=${type} q=${JSON.stringify(q)} count=${page.length} ms=${Date.now() - started}`);
     return { metas: page };
   }
 
@@ -122,15 +141,17 @@ app.get('/', (_req, res) => {
 <html lang="sk"><head><meta charset="utf-8"><title>ČSFD Discovery</title></head>
 <body style="font-family:system-ui;max-width:800px;margin:40px auto;padding:0 20px">
 <h1>ČSFD Discovery – Stremio/Nuvio addon</h1>
-<p>Vyhľadáva filmy, seriály a osoby. People výsledky používajú samostatný typ <code>person</code> s TMDB person ID a detailom osoby.</p>
+<p>Vyhľadáva filmy, seriály a osoby. Filmografia osoby sa zobrazuje v samostatných movie/series katalógoch so štandardnými identitami titulov.</p>
 <ul>
 <li><a href="/manifest.json">manifest.json</a></li>
 <li><a href="/health">health</a></li>
 <li><a href="/stats">stats</a></li>
 <li><a href="/debug/people?q=Brad%20Pitt">debug People: Brad Pitt</a></li>
-<li><a href="/debug/search?type=movie&q=Tom%20Hanks">debug filmy: Tom Hanks</a></li>
+<li><a href="/debug/filmography?type=movie&q=Brad%20Pitt">debug filmografia – filmy: Brad Pitt</a></li>
+<li><a href="/debug/filmography?type=series&q=Brad%20Pitt">debug filmografia – seriály: Brad Pitt</a></li>
+<li><a href="/debug/search?type=movie&q=Fight%20Club">debug názov filmu: Fight Club</a></li>
 </ul>
-<p>Príklady: <code>Brad Pitt</code>, <code>Tom Hanks</code>, <code>Christopher Nolan</code>, <code>Denis Villeneuve</code>.</p>
+<p>Príklady: <code>Brad Pitt</code>, <code>Tom Hanks</code>, <code>režisér: Christopher Nolan</code>, <code>scenárista: Aaron Sorkin</code>.</p>
 </body></html>`);
 });
 
@@ -156,23 +177,6 @@ app.get('/meta/:type/:id.json', async (req, res, next) => {
     if (!['movie', 'series'].includes(req.params.type)) return res.json({ meta: null });
     res.json({ meta: await getMetaById(req.params.type, req.params.id) });
   } catch (e) { next(e); }
-});
-
-app.get('/stream/:type/:id.json', (req, res) => {
-  const target = parsePersonCreditId(req.params.id);
-  if (!target) return res.json({ streams: [] });
-  // Fallback only. Compatible source addons (FastShare/Webshare, SKTorrent, ...)
-  // can return real playable streams for the same person-credit id.
-  res.json({
-    streams: [
-      {
-        name: 'Discovery',
-        title: '↗ Otvoriť normálny detail',
-        description: `Otvoriť ${target.type === 'movie' ? 'film' : 'seriál'} v Nuvio a načítať všetky bežné zdroje`,
-        externalUrl: `nuvio://tmdb/${target.type}/${target.tmdbId}`
-      }
-    ]
-  });
 });
 
 app.get('/people/search.json', async (req, res, next) => {
@@ -207,12 +211,20 @@ app.get('/health', async (_req, res) => {
     tmdbConfigured: configured,
     tmdb,
     peopleEnabled: true,
-    peopleStreamBridge: true,
+    personFilmographyCatalogs: true,
+    standardFilmographyMediaIds: true,
     at: new Date().toISOString()
   });
 });
 
-app.get('/stats', (_req, res) => res.json({ ok: true, cache: cacheStats(), catalogs: catalogs.length, peopleEnabled: true, peopleStreamBridge: true }));
+app.get('/stats', (_req, res) => res.json({
+  ok: true,
+  cache: cacheStats(),
+  catalogs: catalogs.length,
+  peopleEnabled: true,
+  personFilmographyCatalogs: true,
+  standardFilmographyMediaIds: true
+}));
 
 app.get('/debug/people', async (req, res, next) => {
   try {
@@ -221,6 +233,17 @@ app.get('/debug/people', async (req, res, next) => {
     const people = q ? await searchPeople(q, 20) : [];
     console.log(`[debug-people] q=${JSON.stringify(q)} count=${people.length} ms=${Date.now() - started}`);
     res.json({ ok: true, q, count: people.length, elapsedMs: Date.now() - started, people });
+  } catch (e) { next(e); }
+});
+
+app.get('/debug/filmography', async (req, res, next) => {
+  try {
+    const type = req.query.type === 'series' ? 'series' : 'movie';
+    const q = String(req.query.q || '').trim();
+    const started = Date.now();
+    const metas = q ? await searchFilmography(q, type, 20) : [];
+    console.log(`[debug-filmography] type=${type} q=${JSON.stringify(q)} count=${metas.length} ms=${Date.now() - started}`);
+    res.json({ ok: true, type, q, count: metas.length, elapsedMs: Date.now() - started, metas: metas.map(toPublicMeta) });
   } catch (e) { next(e); }
 });
 
