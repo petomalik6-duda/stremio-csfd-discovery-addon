@@ -1,0 +1,10 @@
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import { cached } from './cache.js';
+
+const UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36';
+function norm(s=''){return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9\s]/g,' ').replace(/\s+/g,' ').toLowerCase().trim();}
+function yearOf(item,type){const d=type==='series'?item.first_air_date:item.release_date;return d?String(d).slice(0,4):'';}
+function imageFrom(el){for(const k of ['src','data-src','data-original','data-lazy-src']){const v=el.attr(k);if(v&&/^https?:\/\//i.test(v))return v;}const ss=el.attr('srcset')||el.attr('data-srcset');if(ss){const v=ss.split(',').map(x=>x.trim().split(/\s+/)[0]).find(x=>/^https?:\/\//i.test(x));if(v)return v;}return null;}
+async function filmwebSearchRaw(query){return cached(`filmweb-art:${norm(query)}`,24*60*60*1000,async()=>{const url=`https://www.filmweb.pl/search?q=${encodeURIComponent(query)}`;const {data}=await axios.get(url,{headers:{'User-Agent':UA,'Accept-Language':'pl-PL,pl;q=0.9,en;q=0.8'},timeout:8000});return data;});}
+export async function externalPosterByTitle(item,type){const title=(type==='series'?item.name:item.title)||(type==='series'?item.original_name:item.original_title)||'';const original=type==='series'?item.original_name:item.original_title;const year=yearOf(item,type);const queries=[title,original].filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i);for(const q of queries){let html;try{html=await filmwebSearchRaw(`${q}${year?' '+year:''}`);}catch(e){console.warn('[filmweb-search]',q,e.message);continue;}const $=cheerio.load(html);let best=null;$('img').each((_,node)=>{const img=$(node),url=imageFrom(img);if(!url)return;const alt=img.attr('alt')||'';const box=img.closest('a,article,li,div');const text=`${alt} ${box.text()}`;const nt=norm(text),nq=norm(q);if(!nq||!nt.includes(nq))return;let score=4;if(year&&text.includes(year))score+=3;if(/plakat|poster/i.test(`${alt} ${img.attr('class')||''}`))score+=2;if(!best||score>best.score)best={url,score};});if(best?.url)return{poster:best.url,source:'filmweb'};}return null;}
