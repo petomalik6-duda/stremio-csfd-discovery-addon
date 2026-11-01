@@ -29,7 +29,9 @@ try {
   assert.equal(health.tmdbConfigured, false);
   assert.equal(health.peopleEnabled, true);
   assert.equal(health.richPersonProfiles, true);
+  assert.equal(health.compactPersonProfile, true);
   assert.equal(health.personFilmographyCatalogs, true);
+  assert.equal(health.personHighlightCatalogs, true);
   assert.equal(health.standardFilmographyMediaIds, true);
   assert.equal(health.filmographyPagination, true);
   assert.equal(health.filmographyPageSize, 20);
@@ -43,6 +45,9 @@ try {
   assert.ok(Array.isArray(manifest.catalogs));
   assert.ok(manifest.types.includes('person'));
   assert.equal(manifest.nuvio?.people?.richProfiles, true);
+  assert.equal(manifest.nuvio?.people?.compactProfileText, true);
+  assert.ok(manifest.nuvio?.filmography?.modes?.includes('popular'));
+  assert.ok(manifest.nuvio?.filmography?.modes?.includes('upcoming'));
 
   const peopleCatalog = manifest.catalogs.find(c => c.type === 'person' && c.id === 'csfd-people');
   assert.ok(peopleCatalog);
@@ -50,14 +55,17 @@ try {
 
   const movieFilmography = manifest.catalogs.find(c => c.type === 'movie' && c.id === 'csfd-person-movies');
   const seriesFilmography = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-series');
-  assert.ok(movieFilmography);
-  assert.ok(seriesFilmography);
-  assert.equal(movieFilmography.pageSize, 20);
-  assert.equal(seriesFilmography.pageSize, 20);
-  assert.ok(movieFilmography.extra?.some(e => e.name === 'search' && e.isRequired === true));
-  assert.ok(seriesFilmography.extra?.some(e => e.name === 'search' && e.isRequired === true));
-  assert.ok(movieFilmography.extra?.some(e => e.name === 'skip'));
-  assert.ok(seriesFilmography.extra?.some(e => e.name === 'skip'));
+  const popularMovies = manifest.catalogs.find(c => c.type === 'movie' && c.id === 'csfd-person-popular-movies');
+  const popularSeries = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-popular-series');
+  const upcomingMovies = manifest.catalogs.find(c => c.type === 'movie' && c.id === 'csfd-person-upcoming-movies');
+  const upcomingSeries = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-upcoming-series');
+
+  for (const catalog of [movieFilmography, seriesFilmography, popularMovies, popularSeries, upcomingMovies, upcomingSeries]) {
+    assert.ok(catalog);
+    assert.equal(catalog.pageSize, 20);
+    assert.ok(catalog.extra?.some(e => e.name === 'search' && e.isRequired === true));
+    assert.ok(catalog.extra?.some(e => e.name === 'skip'));
+  }
 
   const metaResource = manifest.resources.find(r => typeof r === 'object' && r.name === 'meta');
   assert.ok(metaResource);
@@ -73,9 +81,11 @@ try {
     catalogs: manifest.catalogs.length,
     addon: manifest.name,
     peopleCatalog: peopleCatalog.name,
-    richPersonProfiles: health.richPersonProfiles,
-    movieFilmography: movieFilmography.name,
-    seriesFilmography: seriesFilmography.name,
+    compactPersonProfile: health.compactPersonProfile,
+    popularMovies: popularMovies.name,
+    popularSeries: popularSeries.name,
+    upcomingMovies: upcomingMovies.name,
+    upcomingSeries: upcomingSeries.name,
     filmographyPageSize: movieFilmography.pageSize,
     filmographyRatingSource: health.filmographyRatingSource
   });
