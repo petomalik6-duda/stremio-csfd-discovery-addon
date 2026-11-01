@@ -1,8 +1,5 @@
-import { imageUrl, personCredits, personDetails, searchPerson } from './tmdb.js';
-
-function normalize(value = '') {
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-}
+import { imageUrl, personCredits, personDetails } from './tmdb.js';
+import { searchPeopleFuzzy } from './discovery.js';
 
 function personSearchMeta(person) {
   const knownFor = (person.known_for || [])
@@ -27,10 +24,8 @@ function personSearchMeta(person) {
 }
 
 export async function searchPeople(query, limit = 20) {
-  const people = await searchPerson(query);
-  const exact = people.filter(p => normalize(p.name) === normalize(query));
-  const rest = people.filter(p => normalize(p.name) !== normalize(query));
-  return [...exact, ...rest].slice(0, limit).map(personSearchMeta);
+  const people = await searchPeopleFuzzy(query, limit);
+  return people.map(personSearchMeta);
 }
 
 function creditDate(item) {
