@@ -41,10 +41,6 @@ function creditYear(item) {
   return String(item.release_date || item.first_air_date || '').slice(0, 4) || null;
 }
 
-function creditRole(item) {
-  return item.character || item.job || null;
-}
-
 function uniqueCredits(credits) {
   const seen = new Set();
   return [...(credits.cast || []), ...(credits.crew || [])]
@@ -86,35 +82,6 @@ function formatDate(value) {
   return `${Number(match[3])}. ${Number(match[2])}. ${match[1]}`;
 }
 
-function creditLabel(item) {
-  const title = creditTitle(item);
-  const year = creditYear(item);
-  const kind = item.media_type === 'tv' ? 'seriál' : 'film';
-  return `${title}${year ? ` (${year})` : ''} · ${kind}`;
-}
-
-function profileFilmography(credits) {
-  const all = uniqueCredits(credits);
-  const now = Date.now();
-  const released = all.filter(item => creditDate(item) > 0 && creditDate(item) <= now);
-  const upcoming = all
-    .filter(item => creditDate(item) > now)
-    .sort((a, b) => creditDate(a) - creditDate(b) || (b.popularity || 0) - (a.popularity || 0))
-    .slice(0, 8);
-  const latest = released
-    .sort((a, b) => creditDate(b) - creditDate(a) || (b.popularity || 0) - (a.popularity || 0))
-    .slice(0, 8);
-  const popular = [...all]
-    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0) || creditDate(b) - creditDate(a))
-    .slice(0, 8);
-  return { popular, latest, upcoming };
-}
-
-function creditSection(title, rows) {
-  if (!rows.length) return null;
-  return `${title}\n${rows.map((item, index) => `${index + 1}. ${creditLabel(item)}`).join('\n')}`;
-}
-
 function roleSummary(counts) {
   const roles = [];
   if (counts.actingMovies || counts.actingSeries) roles.push('Herectvo');
@@ -142,7 +109,6 @@ export async function getPersonMeta(rawId) {
   const counts = countCredits(credits);
   const roles = roleSummary(counts);
   const stats = statsSummary(counts);
-  const highlights = profileFilmography(credits);
 
   const identity = [
     person.birthday ? `Narodenie: ${formatDate(person.birthday)}` : null,
@@ -156,14 +122,7 @@ export async function getPersonMeta(rawId) {
   if (identity.length) sections.push(`ZÁKLADNÉ ÚDAJE\n${identity.join('\n')}`);
   if (roles.length) sections.push(`PROFESIE\n${roles.join(' • ')}`);
   if (stats.length) sections.push(`FILMOGRAFIA\n${stats.join(' • ')}`);
-
-  const popularSection = creditSection('⭐ POPULÁRNE', highlights.popular);
-  const latestSection = creditSection('🆕 NAJNOVŠIE', highlights.latest);
-  const upcomingSection = creditSection('📅 PRIPRAVOVANÉ', highlights.upcoming);
-  if (popularSection) sections.push(popularSection);
-  if (latestSection) sections.push(latestSection);
-  if (upcomingSection) sections.push(upcomingSection);
-  sections.push('Kompletnú filmografiu môžeš ďalej filtrovať v katalógoch addonu pre filmy, seriály, réžiu a produkciu.');
+  sections.push('Plagátovú filmografiu nájdeš v katalógoch addonu: Populárne, Filmy, Seriály, Réžia/produkcia a Pripravované.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
@@ -195,31 +154,7 @@ export async function getPersonMeta(rawId) {
         deathday: person.deathday || null,
         placeOfBirth: person.place_of_birth || null,
         knownForDepartment: person.known_for_department || null,
-        creditCounts: counts,
-        popular: highlights.popular.map(item => ({
-          tmdbId: item.id,
-          type: item.media_type === 'tv' ? 'series' : 'movie',
-          name: creditTitle(item),
-          year: creditYear(item),
-          role: creditRole(item),
-          poster: imageUrl(item.poster_path, 'w500')
-        })),
-        latest: highlights.latest.map(item => ({
-          tmdbId: item.id,
-          type: item.media_type === 'tv' ? 'series' : 'movie',
-          name: creditTitle(item),
-          year: creditYear(item),
-          role: creditRole(item),
-          poster: imageUrl(item.poster_path, 'w500')
-        })),
-        upcoming: highlights.upcoming.map(item => ({
-          tmdbId: item.id,
-          type: item.media_type === 'tv' ? 'series' : 'movie',
-          name: creditTitle(item),
-          year: creditYear(item),
-          role: creditRole(item),
-          poster: imageUrl(item.poster_path, 'w500')
-        }))
+        creditCounts: counts
       }
     },
     behaviorHints: {
