@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { __fuzzyTest } from '../src/discovery.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const port = 19123;
@@ -24,14 +25,28 @@ async function waitForHealth() {
 }
 
 try {
+  const typo = 'silvester stalone';
+  const target = 'Sylvester Stallone';
+  assert.ok(__fuzzyTest.nameSimilarity(typo, target) > 0.80);
+  const fuzzyQueries = [
+    ...__fuzzyTest.primaryPersonQueries(typo),
+    ...__fuzzyTest.fallbackPersonQueries(typo)
+  ];
+  assert.ok(fuzzyQueries.includes('sylvester'));
+  assert.ok(fuzzyQueries.includes('stallone'));
+
   const health = await waitForHealth();
   assert.equal(health.ok, true);
   assert.equal(health.tmdbConfigured, false);
   assert.equal(health.peopleEnabled, true);
   assert.equal(health.richPersonProfiles, true);
   assert.equal(health.compactPersonProfile, true);
+  assert.equal(health.fuzzySearchVersion, 2);
+  assert.equal(health.parallelPersonSearch, true);
+  assert.equal(health.personSearchCacheHours, 12);
   assert.equal(health.personFilmographyCatalogs, true);
-  assert.equal(health.personHighlightCatalogs, true);
+  assert.equal(health.popularPersonCatalogs, false);
+  assert.equal(health.upcomingPersonCatalogs, true);
   assert.equal(health.standardFilmographyMediaIds, true);
   assert.equal(health.filmographyPagination, true);
   assert.equal(health.filmographyPageSize, 20);
@@ -46,7 +61,9 @@ try {
   assert.ok(manifest.types.includes('person'));
   assert.equal(manifest.nuvio?.people?.richProfiles, true);
   assert.equal(manifest.nuvio?.people?.compactProfileText, true);
-  assert.ok(manifest.nuvio?.filmography?.modes?.includes('popular'));
+  assert.equal(manifest.nuvio?.people?.fuzzySearchVersion, 2);
+  assert.equal(manifest.nuvio?.people?.parallelSearch, true);
+  assert.ok(!manifest.nuvio?.filmography?.modes?.includes('popular'));
   assert.ok(manifest.nuvio?.filmography?.modes?.includes('upcoming'));
 
   const peopleCatalog = manifest.catalogs.find(c => c.type === 'person' && c.id === 'csfd-people');
@@ -55,12 +72,15 @@ try {
 
   const movieFilmography = manifest.catalogs.find(c => c.type === 'movie' && c.id === 'csfd-person-movies');
   const seriesFilmography = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-series');
-  const popularMovies = manifest.catalogs.find(c => c.type === 'movie' && c.id === 'csfd-person-popular-movies');
-  const popularSeries = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-popular-series');
   const upcomingMovies = manifest.catalogs.find(c => c.type === 'movie' && c.id === 'csfd-person-upcoming-movies');
   const upcomingSeries = manifest.catalogs.find(c => c.type === 'series' && c.id === 'csfd-person-upcoming-series');
+  const popularMovies = manifest.catalogs.find(c => c.id === 'csfd-person-popular-movies');
+  const popularSeries = manifest.catalogs.find(c => c.id === 'csfd-person-popular-series');
 
-  for (const catalog of [movieFilmography, seriesFilmography, popularMovies, popularSeries, upcomingMovies, upcomingSeries]) {
+  assert.equal(popularMovies, undefined);
+  assert.equal(popularSeries, undefined);
+
+  for (const catalog of [movieFilmography, seriesFilmography, upcomingMovies, upcomingSeries]) {
     assert.ok(catalog);
     assert.equal(catalog.pageSize, 20);
     assert.ok(catalog.extra?.some(e => e.name === 'search' && e.isRequired === true));
@@ -80,14 +100,14 @@ try {
     version: manifest.version,
     catalogs: manifest.catalogs.length,
     addon: manifest.name,
+    fuzzySearchVersion: health.fuzzySearchVersion,
+    parallelPersonSearch: health.parallelPersonSearch,
+    typoSimilarity: __fuzzyTest.nameSimilarity(typo, target).toFixed(3),
+    typoRecoveryQueries: fuzzyQueries.filter(q => q === 'sylvester' || q === 'stallone'),
     peopleCatalog: peopleCatalog.name,
-    compactPersonProfile: health.compactPersonProfile,
-    popularMovies: popularMovies.name,
-    popularSeries: popularSeries.name,
     upcomingMovies: upcomingMovies.name,
     upcomingSeries: upcomingSeries.name,
-    filmographyPageSize: movieFilmography.pageSize,
-    filmographyRatingSource: health.filmographyRatingSource
+    filmographyPageSize: movieFilmography.pageSize
   });
 } finally {
   child.kill('SIGTERM');
