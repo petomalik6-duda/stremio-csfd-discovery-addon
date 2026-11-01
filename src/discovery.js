@@ -1,9 +1,10 @@
-import { imageUrl, personCredits, searchPerson, searchPersonNgram } from './tmdb.js';
+import { imageUrl, personCredits, searchPerson } from './tmdb.js';
 import { externalPosterByTitle } from './externalArtwork.js';
 
-const PERSON_TTL = 30 * 60 * 1000;
-const FILMOGRAPHY_TTL = 30 * 60 * 1000;
+const PERSON_TTL = 12 * 60 * 60 * 1000;
+const FILMOGRAPHY_TTL = 6 * 60 * 60 * 1000;
 const EXTERNAL_TTL = 7 * 24 * 60 * 60 * 1000;
+const PERSON_QUERY_BATCH = 8;
 
 const personCache = new Map();
 const personInflight = new Map();
@@ -119,12 +120,163 @@ function nameSimilarity(a, b) {
   let reverse = 0;
   for (const t of ya) {
     let best = 0;
-    for (const q of xa) best = Math.max(best, tokenSimilarity(q, t));
+    for (const q of xa) best = Math.max(best, tokenSimilarity(t, q));
     reverse += best;
   }
   reverse /= ya.length;
 
   return forward * 0.42 + reverse * 0.13 + tokenSimilarity(xa[0], ya[0]) * 0.25 + tokenSimilarity(xa.at(-1), ya.at(-1)) * 0.20;
+}
+
+function swapIYVariants(token) {
+  const out = new Set();
+  for (let i = 0; i < token.length; i++) {
+    if (token[i] === 'i') out.add(token.slice(0, i) + 'y' + token.slice(i + 1));
+    if (token[i] === 'y') out.add(token.slice(0, i) + 'i' + token.slice(i + 1));
+  }
+  return [...out];
+}
+
+function duplicateConsonantVariants(token) {
+  const out = new Set();
+  const consonant = /[bcdfghjklmnpqrstvwxyz]/;
+  for (let i = 1; i < token.length - 1; i++) {
+    if (consonant.test(token[i])) out.add(token.slice(0, i) + token[i] + token.slice(i));
+  }
+  return [...out];
+}
+
+function deletionVariants(token) {
+  if (token.length < 6) return [];
+  const out = [];
+  for (let i = 1; i < token.length - 1; i++) out.push(token.slice(0, i) + token.slice(i + 1));
+  return out;
+}
+
+function primaryPersonQueries(query) {
+  const q = normalize(query);
+  const tokens = q.split(' ').filter(Boolean);
+  const out = new Set([q]);
+  for (const token of tokens) {
+    out.add(token);
+    if (token.length >= 5) out.add(token.slice(0, 5));
+    if (token.length >= 6) out.add(token.slice(0, 6));
+    for (const v of swapIYVariants(token)) out.add(v);
+  }
+  return [...out].filter(x => x.length >= 2).slice(0, 12);
+}
+
+function fallbackPersonQueries(query) {
+  const tokens = normalize(query).split(' ').filter(Boolean);
+  const out = new Set();
+  for (const token of [...tokens].reverse()) {
+    if (token.length >= 5) {
+      for (let n = 4; n <= Math.min(7, token.length - 1); n++) out.add(token.slice(0, n));
+      for (const v of swapIYVariants(token)) out.add(v);
+      for (const v of duplicateConsonantVariants(token)) out.add(v);
+      for (const v of deletionVariants(token)) out.add(v);
+    }
+  }
+  return [...out].filter(x => x.length >= 3).slice(0, 20);
+}
+
+function rankPeople(people, query) {
+  const qt = normalize(query).split(' ').filter(Boolean);
+  const qFirst = qt[0] || '';
+  const qLast = qt.at(-1) || '';
+  return (people || []).map((person, index) => {
+    const pt = normalize(person.name).split(' ').filter(Boolean);
+    const similarity = nameSimilarity(query, person.name);
+    const first = tokenSimilarity(qFirst, pt[0] || '');
+    const last = tokenSimilarity(qLast, pt.at(-1) || '');
+    const fullName = pt.length > 1;
+    const popularity = Math.max(0, Number(person.popularity) || 0);
+    return {
+      p: person,
+      index,
+      similarity,
+      first,
+      last,
+      fullName,
+      score: similarity + first * 0.24 + last * 0.30 + (qt.length > 1 && fullName ? 0.18 : -0.22) + Math.min(0.14, Math.log10(popularity + 1) * 0.04)
+    };
+  }).sort((a, b) => b.score - a.score || b.similarity - a.similarity || a.index - b.index);
+}
+
+function bestPersonRank(people, query) {
+  return rankPeople(people, query)[0] || null;
+}
+
+function bestPersonMatch(people, query) {
+  const qt = normalize(query).split(' ').filter(Boolean);
+  const best = bestPersonRank(people, query);
+  if (!best) return null;
+  if (qt.length > 1) {
+    if (!best.fullName || best.first < 0.66 || best.last < 0.66 || best.similarity < 0.66) return null;
+  } else if (best.similarity < 0.52) return null;
+  return best.p;
+}
+
+function confidentPersonMatch(people, query) {
+  const qt = normalize(query).split(' ').filter(Boolean);
+  const best = bestPersonRank(people, query);
+  if (!best) return false;
+  if (qt.length > 1) return best.fullName && best.first >= 0.76 && best.last >= 0.76 && best.similarity >= 0.80;
+  return best.similarity >= 0.82;
+}
+
+async function runPersonQueries(queries, add) {
+  for (let i = 0; i < queries.length; i += PERSON_QUERY_BATCH) {
+    const batch = queries.slice(i, i + PERSON_QUERY_BATCH);
+    const results = await Promise.allSettled(batch.map(q => searchPerson(q)));
+    for (const result of results) {
+      if (result.status === 'fulfilled') add(result.value);
+    }
+  }
+}
+
+async function findPeopleFuzzyUncached(query) {
+  const combined = [];
+  const seen = new Set();
+  const add = rows => {
+    for (const person of rows || []) {
+      if (!seen.has(person.id)) {
+        seen.add(person.id);
+        combined.push(person);
+      }
+    }
+  };
+
+  const primary = primaryPersonQueries(query);
+  await runPersonQueries(primary, add);
+  if (confidentPersonMatch(combined, query)) return combined;
+
+  const primarySet = new Set(primary);
+  const fallback = fallbackPersonQueries(query).filter(q => !primarySet.has(q));
+  await runPersonQueries(fallback, add);
+  return combined;
+}
+
+async function findPeopleFuzzy(query) {
+  const key = normalize(query);
+  return shared(personCache, personInflight, key, PERSON_TTL, () => findPeopleFuzzyUncached(query));
+}
+
+async function resolvePerson(query) {
+  return bestPersonMatch(await findPeopleFuzzy(query), query);
+}
+
+export async function searchPeopleFuzzy(query, limit = 20) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  const people = await findPeopleFuzzy(q);
+  const ranked = rankPeople(people, q);
+  const best = bestPersonMatch(people, q);
+  if (!best) return [];
+  return [
+    best,
+    ...ranked.map(r => r.p).filter(p => p.id !== best.id && nameSimilarity(q, p.name) >= 0.64)
+  ].slice(0, limit);
 }
 
 function creditDate(credit) {
@@ -167,100 +319,6 @@ function pickPersonCredits(credits, role, type) {
     if (!unique.has(key)) unique.set(key, row);
   }
   return [...unique.values()].sort((a, b) => creditDate(b) - creditDate(a) || creditPopularity(b) - creditPopularity(a));
-}
-
-function rankPeople(people, query) {
-  const qt = normalize(query).split(' ').filter(Boolean);
-  const qFirst = qt[0] || '';
-  const qLast = qt.at(-1) || '';
-  return (people || []).map((person, index) => {
-    const pt = normalize(person.name).split(' ').filter(Boolean);
-    const similarity = nameSimilarity(query, person.name);
-    const first = tokenSimilarity(qFirst, pt[0] || '');
-    const last = tokenSimilarity(qLast, pt.at(-1) || '');
-    const fullName = pt.length > 1;
-    const popularity = Math.max(0, Number(person.popularity) || 0);
-    return {
-      p: person,
-      index,
-      similarity,
-      first,
-      last,
-      fullName,
-      score: similarity + first * 0.24 + last * 0.28 + (qt.length > 1 && fullName ? 0.18 : -0.22) + Math.min(0.12, Math.log10(popularity + 1) * 0.035)
-    };
-  }).sort((a, b) => b.score - a.score || b.similarity - a.similarity || a.index - b.index);
-}
-
-function bestPersonMatch(people, query) {
-  const qt = normalize(query).split(' ').filter(Boolean);
-  const best = rankPeople(people, query)[0];
-  if (!best) return null;
-  if (qt.length > 1) {
-    if (!best.fullName || best.first < 0.72 || best.last < 0.72 || best.similarity < 0.72) return null;
-  } else if (best.similarity < 0.55) return null;
-  return best.p;
-}
-
-function variants(query) {
-  const parts = normalize(query).split(' ').filter(Boolean);
-  const out = new Set([normalize(query), ...parts]);
-  for (const p of parts) {
-    if (p.length >= 5) {
-      for (const n of [4, 5, 6, 7]) if (p.length >= n) out.add(p.slice(0, n));
-      for (let i = 0; i < p.length; i++) out.add(p.slice(0, i) + p.slice(i + 1));
-    }
-  }
-  return [...out].filter(x => x.length >= 2).slice(0, 40);
-}
-
-async function findPeopleFuzzyUncached(query) {
-  const combined = [];
-  const seen = new Set();
-  const add = rows => {
-    for (const p of rows || []) {
-      if (!seen.has(p.id)) {
-        seen.add(p.id);
-        combined.push(p);
-      }
-    }
-  };
-
-  try {
-    add(await searchPerson(query));
-    add(await searchPersonNgram(query));
-  } catch {}
-
-  for (const variant of variants(query)) {
-    try {
-      add(await searchPersonNgram(variant));
-    } catch {}
-    const best = bestPersonMatch(combined, query);
-    if (best && nameSimilarity(query, best.name) >= 0.90) break;
-  }
-  return combined;
-}
-
-async function findPeopleFuzzy(query) {
-  const key = normalize(query);
-  return shared(personCache, personInflight, key, PERSON_TTL, () => findPeopleFuzzyUncached(query));
-}
-
-async function resolvePerson(query) {
-  return bestPersonMatch(await findPeopleFuzzy(query), query);
-}
-
-export async function searchPeopleFuzzy(query, limit = 20) {
-  const q = String(query || '').trim();
-  if (!q) return [];
-  const people = await findPeopleFuzzy(q);
-  const ranked = rankPeople(people, q);
-  const best = bestPersonMatch(people, q);
-  if (!best) return [];
-  return [
-    best,
-    ...ranked.map(r => r.p).filter(p => p.id !== best.id && nameSimilarity(q, p.name) >= 0.72)
-  ].slice(0, limit);
 }
 
 function isDocumentaryCredit(item) {
@@ -330,7 +388,7 @@ async function fastFilmography(query, role, type) {
       continue;
     }
     if (cached === false) continue;
-    if (warmCount < 12) {
+    if (warmCount < 6) {
       warmExternal(entry.item, type);
       warmCount++;
     }
@@ -346,11 +404,6 @@ function applyCatalogMode(rows, category) {
   if (category === 'creator') return rows;
 
   const nonDocumentary = rows.filter(x => !isDocumentaryCredit(x.item));
-  if (category === 'popular') {
-    return [...nonDocumentary].sort((a, b) =>
-      creditPopularity(b.item) - creditPopularity(a.item) || creditDate(b.item) - creditDate(a.item)
-    );
-  }
   if (category === 'upcoming') {
     const now = Date.now();
     return nonDocumentary
@@ -367,3 +420,10 @@ export async function searchFilmography(rawQuery, type, category = 'main', force
   const rows = await fastFilmography(parsed.query, role, type);
   return applyCatalogMode(rows, category).map(x => x.meta);
 }
+
+export const __fuzzyTest = {
+  normalize,
+  nameSimilarity,
+  primaryPersonQueries,
+  fallbackPersonQueries
+};
