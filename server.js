@@ -7,7 +7,7 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.4.7';
+const ADDON_VERSION = process.env.npm_package_version || '1.4.8';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const FILMOGRAPHY_PAGE_SIZE = 20;
 const app = express();
@@ -16,19 +16,23 @@ const searchExtra = [{ name: 'search', isRequired: true }];
 const pagedSearchExtra = [...searchExtra, { name: 'skip' }];
 const catalogs = [
   { type: 'person', id: 'csfd-people', name: '👤 Osoby', extra: searchExtra },
+  { type: 'movie', id: 'csfd-person-popular-movies', name: '⭐ Populárne filmy osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'series', id: 'csfd-person-popular-series', name: '⭐ Populárne seriály osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
   { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia osoby – filmy', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
-  { type: 'movie', id: 'csfd-person-special-movies', name: '🎞️ Filmografia osoby – dokumenty a krátke filmy', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
-  { type: 'movie', id: 'csfd-person-creator-movies', name: '🎬 Osoba ako režisér alebo producent – filmy', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
   { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia osoby – seriály', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
-  { type: 'series', id: 'csfd-person-documentary-series', name: '🎥 Filmografia osoby – dokumentárne seriály', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
-  { type: 'series', id: 'csfd-person-creator-series', name: '📺 Osoba ako režisér alebo producent – seriály', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE }
+  { type: 'movie', id: 'csfd-person-creator-movies', name: '🎥 Réžia/produkcia osoby – filmy', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'series', id: 'csfd-person-creator-series', name: '🎥 Réžia/produkcia osoby – seriály', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'movie', id: 'csfd-person-upcoming-movies', name: '📅 Pripravované filmy osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'series', id: 'csfd-person-upcoming-series', name: '📅 Pripravované seriály osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'movie', id: 'csfd-person-special-movies', name: '🎞️ Dokumenty a krátke filmy osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
+  { type: 'series', id: 'csfd-person-documentary-series', name: '🎞️ Dokumentárne seriály osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE }
 ];
 
 const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD – osoby a filmografia',
-  description: 'Vyhľadávanie osôb s bohatým profilom, biografiou, základnými údajmi a filmografickými prehľadmi; samostatné katalógy pre herectvo, réžiu, produkciu, dokumenty a seriály.',
+  description: 'Vyhľadávanie osôb s čistým profilom a posterovými katalógmi pre populárne tituly, filmy, seriály, réžiu/produkciu, pripravované tituly a dokumenty.',
   resources: [
     'catalog',
     { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
@@ -42,15 +46,16 @@ const manifest = {
       enabled: true,
       catalogId: 'csfd-people',
       idPrefix: 'person:',
-      richProfiles: true
+      richProfiles: true,
+      compactProfileText: true
     },
     filmography: {
       standardMediaIds: true,
       completeResponse: true,
-      sort: 'release_date_desc',
       ratingSource: 'TMDB',
       pagination: true,
-      pageSize: FILMOGRAPHY_PAGE_SIZE
+      pageSize: FILMOGRAPHY_PAGE_SIZE,
+      modes: ['popular', 'acting', 'creator', 'upcoming', 'documentary']
     }
   }
 };
@@ -105,11 +110,14 @@ async function catalogResponse(type, id, extra = {}) {
 
   let category = 'main';
   let forcedRole = null;
+
   if (id === 'csfd-person-special-movies' || id === 'csfd-person-documentary-series') category = 'special';
   if (id === 'csfd-person-creator-movies' || id === 'csfd-person-creator-series') {
     category = 'creator';
     forcedRole = 'creator';
   }
+  if (id === 'csfd-person-popular-movies' || id === 'csfd-person-popular-series') category = 'popular';
+  if (id === 'csfd-person-upcoming-movies' || id === 'csfd-person-upcoming-series') category = 'upcoming';
 
   const rows = await searchFilmography(q, type, category, forcedRole);
   const skip = parseSkip(extra.skip);
@@ -121,7 +129,7 @@ async function catalogResponse(type, id, extra = {}) {
   return { metas };
 }
 
-app.get('/', (_req, res) => res.type('html').send('<!doctype html><html lang="sk"><body><h1>ČSFD – osoby a filmografia</h1><p>Vyhľadávanie osôb s bohatým profilom a 6 filmografickými katalógmi.</p><a href="/manifest.json">manifest.json</a></body></html>'));
+app.get('/', (_req, res) => res.type('html').send('<!doctype html><html lang="sk"><body><h1>ČSFD – osoby a filmografia</h1><p>Vyhľadávanie osôb s čistým profilom a 10 posterovými filmografickými katalógmi.</p><a href="/manifest.json">manifest.json</a></body></html>'));
 app.get('/manifest.json', (_req, res) => res.json(manifest));
 app.get('/catalog/:type/:id.json', async (req, res, next) => {
   try {
@@ -187,7 +195,9 @@ app.get('/health', async (_req, res) => {
     tmdb,
     peopleEnabled: true,
     richPersonProfiles: true,
+    compactPersonProfile: true,
     personFilmographyCatalogs: true,
+    personHighlightCatalogs: true,
     standardFilmographyMediaIds: true,
     filmographyPagination: true,
     filmographyPageSize: FILMOGRAPHY_PAGE_SIZE,
@@ -202,6 +212,8 @@ app.get('/stats', (_req, res) => res.json({
   ok: true,
   cache: cacheStats(),
   richPersonProfiles: true,
+  compactPersonProfile: true,
+  personHighlightCatalogs: true,
   catalogs: catalogs.length,
   catalogIds: catalogs.map(c => c.id)
 }));
