@@ -7,7 +7,7 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.4.8';
+const ADDON_VERSION = process.env.npm_package_version || '1.4.9';
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const FILMOGRAPHY_PAGE_SIZE = 20;
 const app = express();
@@ -16,8 +16,6 @@ const searchExtra = [{ name: 'search', isRequired: true }];
 const pagedSearchExtra = [...searchExtra, { name: 'skip' }];
 const catalogs = [
   { type: 'person', id: 'csfd-people', name: '👤 Osoby', extra: searchExtra },
-  { type: 'movie', id: 'csfd-person-popular-movies', name: '⭐ Populárne filmy osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
-  { type: 'series', id: 'csfd-person-popular-series', name: '⭐ Populárne seriály osoby', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
   { type: 'movie', id: 'csfd-person-movies', name: '🎬 Filmografia osoby – filmy', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
   { type: 'series', id: 'csfd-person-series', name: '📺 Filmografia osoby – seriály', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
   { type: 'movie', id: 'csfd-person-creator-movies', name: '🎥 Réžia/produkcia osoby – filmy', extra: pagedSearchExtra, pageSize: FILMOGRAPHY_PAGE_SIZE },
@@ -32,7 +30,7 @@ const manifest = {
   id: ADDON_ID,
   version: ADDON_VERSION,
   name: 'ČSFD – osoby a filmografia',
-  description: 'Vyhľadávanie osôb s čistým profilom a posterovými katalógmi pre populárne tituly, filmy, seriály, réžiu/produkciu, pripravované tituly a dokumenty.',
+  description: 'Rýchle fuzzy vyhľadávanie osôb s čistým profilom a posterovými katalógmi pre filmy, seriály, réžiu/produkciu, pripravované tituly a dokumenty.',
   resources: [
     'catalog',
     { name: 'meta', types: ['movie', 'series', 'person'], idPrefixes: ['tt', 'tmdb:', 'person:'] }
@@ -47,7 +45,9 @@ const manifest = {
       catalogId: 'csfd-people',
       idPrefix: 'person:',
       richProfiles: true,
-      compactProfileText: true
+      compactProfileText: true,
+      fuzzySearchVersion: 2,
+      parallelSearch: true
     },
     filmography: {
       standardMediaIds: true,
@@ -55,7 +55,7 @@ const manifest = {
       ratingSource: 'TMDB',
       pagination: true,
       pageSize: FILMOGRAPHY_PAGE_SIZE,
-      modes: ['popular', 'acting', 'creator', 'upcoming', 'documentary']
+      modes: ['acting', 'creator', 'upcoming', 'documentary']
     }
   }
 };
@@ -105,6 +105,7 @@ async function catalogResponse(type, id, extra = {}) {
   const started = Date.now();
   if (type === 'person') {
     const rows = await searchPeople(q, 20);
+    console.log(`[people-search] q=${JSON.stringify(q)} count=${rows.length} ms=${Date.now() - started}`);
     return { metas: rows };
   }
 
@@ -116,7 +117,6 @@ async function catalogResponse(type, id, extra = {}) {
     category = 'creator';
     forcedRole = 'creator';
   }
-  if (id === 'csfd-person-popular-movies' || id === 'csfd-person-popular-series') category = 'popular';
   if (id === 'csfd-person-upcoming-movies' || id === 'csfd-person-upcoming-series') category = 'upcoming';
 
   const rows = await searchFilmography(q, type, category, forcedRole);
@@ -129,7 +129,7 @@ async function catalogResponse(type, id, extra = {}) {
   return { metas };
 }
 
-app.get('/', (_req, res) => res.type('html').send('<!doctype html><html lang="sk"><body><h1>ČSFD – osoby a filmografia</h1><p>Vyhľadávanie osôb s čistým profilom a 10 posterovými filmografickými katalógmi.</p><a href="/manifest.json">manifest.json</a></body></html>'));
+app.get('/', (_req, res) => res.type('html').send('<!doctype html><html lang="sk"><body><h1>ČSFD – osoby a filmografia</h1><p>Rýchle fuzzy vyhľadávanie osôb a 8 posterových filmografických katalógov.</p><a href="/manifest.json">manifest.json</a></body></html>'));
 app.get('/manifest.json', (_req, res) => res.json(manifest));
 app.get('/catalog/:type/:id.json', async (req, res, next) => {
   try {
@@ -196,8 +196,12 @@ app.get('/health', async (_req, res) => {
     peopleEnabled: true,
     richPersonProfiles: true,
     compactPersonProfile: true,
+    fuzzySearchVersion: 2,
+    parallelPersonSearch: true,
+    personSearchCacheHours: 12,
     personFilmographyCatalogs: true,
-    personHighlightCatalogs: true,
+    popularPersonCatalogs: false,
+    upcomingPersonCatalogs: true,
     standardFilmographyMediaIds: true,
     filmographyPagination: true,
     filmographyPageSize: FILMOGRAPHY_PAGE_SIZE,
@@ -213,7 +217,10 @@ app.get('/stats', (_req, res) => res.json({
   cache: cacheStats(),
   richPersonProfiles: true,
   compactPersonProfile: true,
-  personHighlightCatalogs: true,
+  fuzzySearchVersion: 2,
+  parallelPersonSearch: true,
+  popularPersonCatalogs: false,
+  upcomingPersonCatalogs: true,
   catalogs: catalogs.length,
   catalogIds: catalogs.map(c => c.id)
 }));
