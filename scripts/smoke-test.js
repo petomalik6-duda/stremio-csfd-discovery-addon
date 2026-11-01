@@ -28,6 +28,7 @@ try {
   assert.equal(health.ok, true);
   assert.equal(health.tmdbConfigured, false);
   assert.equal(health.peopleEnabled, true);
+  assert.equal(health.richPersonProfiles, true);
   assert.equal(health.personFilmographyCatalogs, true);
   assert.equal(health.standardFilmographyMediaIds, true);
   assert.equal(health.filmographyPagination, true);
@@ -41,6 +42,7 @@ try {
   assert.equal(manifest.version, pkg.version);
   assert.ok(Array.isArray(manifest.catalogs));
   assert.ok(manifest.types.includes('person'));
+  assert.equal(manifest.nuvio?.people?.richProfiles, true);
 
   const peopleCatalog = manifest.catalogs.find(c => c.type === 'person' && c.id === 'csfd-people');
   assert.ok(peopleCatalog);
@@ -71,6 +73,7 @@ try {
     catalogs: manifest.catalogs.length,
     addon: manifest.name,
     peopleCatalog: peopleCatalog.name,
+    richPersonProfiles: health.richPersonProfiles,
     movieFilmography: movieFilmography.name,
     seriesFilmography: seriesFilmography.name,
     filmographyPageSize: movieFilmography.pageSize,
