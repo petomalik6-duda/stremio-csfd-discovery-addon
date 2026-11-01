@@ -18,7 +18,8 @@ function personSearchMeta(person) {
       .join('\n'),
     behaviorHints: {
       nuvioPerson: true,
-      tmdbPersonId: person.id
+      tmdbPersonId: person.id,
+      richPersonProfile: true
     }
   };
 }
@@ -32,6 +33,18 @@ function creditDate(item) {
   return Date.parse(item.release_date || item.first_air_date || '') || 0;
 }
 
+function creditTitle(item) {
+  return item.title || item.name || item.original_title || item.original_name || 'Bez názvu';
+}
+
+function creditYear(item) {
+  return String(item.release_date || item.first_air_date || '').slice(0, 4) || null;
+}
+
+function creditRole(item) {
+  return item.character || item.job || null;
+}
+
 function uniqueCredits(credits) {
   const seen = new Set();
   return [...(credits.cast || []), ...(credits.crew || [])]
@@ -41,12 +54,15 @@ function uniqueCredits(credits) {
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
-    })
-    .sort((a, b) => {
-      const dateDiff = creditDate(b) - creditDate(a);
-      if (dateDiff !== 0) return dateDiff;
-      return (b.popularity || 0) - (a.popularity || 0);
     });
+}
+
+function sortedCredits(credits) {
+  return uniqueCredits(credits).sort((a, b) => {
+    const dateDiff = creditDate(b) - creditDate(a);
+    if (dateDiff !== 0) return dateDiff;
+    return (b.popularity || 0) - (a.popularity || 0);
+  });
 }
 
 function countCredits(credits) {
@@ -64,32 +80,99 @@ function countCredits(credits) {
   };
 }
 
+function formatDate(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value || null;
+  return `${Number(match[3])}. ${Number(match[2])}. ${match[1]}`;
+}
+
+function creditLabel(item) {
+  const title = creditTitle(item);
+  const year = creditYear(item);
+  const kind = item.media_type === 'tv' ? 'seriál' : 'film';
+  return `${title}${year ? ` (${year})` : ''} · ${kind}`;
+}
+
+function profileFilmography(credits) {
+  const all = uniqueCredits(credits);
+  const now = Date.now();
+  const released = all.filter(item => creditDate(item) > 0 && creditDate(item) <= now);
+  const upcoming = all
+    .filter(item => creditDate(item) > now)
+    .sort((a, b) => creditDate(a) - creditDate(b) || (b.popularity || 0) - (a.popularity || 0))
+    .slice(0, 8);
+  const latest = released
+    .sort((a, b) => creditDate(b) - creditDate(a) || (b.popularity || 0) - (a.popularity || 0))
+    .slice(0, 8);
+  const popular = [...all]
+    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0) || creditDate(b) - creditDate(a))
+    .slice(0, 8);
+  return { popular, latest, upcoming };
+}
+
+function creditSection(title, rows) {
+  if (!rows.length) return null;
+  return `${title}\n${rows.map((item, index) => `${index + 1}. ${creditLabel(item)}`).join('\n')}`;
+}
+
+function roleSummary(counts) {
+  const roles = [];
+  if (counts.actingMovies || counts.actingSeries) roles.push('Herectvo');
+  if (counts.directingMovies || counts.directingSeries) roles.push('Réžia');
+  if (counts.writingMovies || counts.writingSeries) roles.push('Scenár');
+  return roles;
+}
+
+function statsSummary(counts) {
+  return [
+    counts.actingMovies ? `Filmy – herectvo: ${counts.actingMovies}` : null,
+    counts.actingSeries ? `Seriály – herectvo: ${counts.actingSeries}` : null,
+    counts.directingMovies ? `Filmy – réžia: ${counts.directingMovies}` : null,
+    counts.directingSeries ? `Seriály – réžia: ${counts.directingSeries}` : null,
+    counts.writingMovies ? `Filmy – scenár: ${counts.writingMovies}` : null,
+    counts.writingSeries ? `Seriály – scenár: ${counts.writingSeries}` : null
+  ].filter(Boolean);
+}
+
 export async function getPersonMeta(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return null;
 
   const [person, credits] = await Promise.all([personDetails(id), personCredits(id)]);
   const counts = countCredits(credits);
-  const roles = [];
-  if (counts.actingMovies || counts.actingSeries) roles.push('Herectvo');
-  if (counts.directingMovies || counts.directingSeries) roles.push('Réžia');
-  if (counts.writingMovies || counts.writingSeries) roles.push('Scenár');
+  const roles = roleSummary(counts);
+  const stats = statsSummary(counts);
+  const highlights = profileFilmography(credits);
 
-  const lines = [];
-  if (person.biography) lines.push(person.biography);
-  const stats = [
-    counts.actingMovies ? `Filmy (herectvo): ${counts.actingMovies}` : null,
-    counts.actingSeries ? `Seriály (herectvo): ${counts.actingSeries}` : null,
-    counts.directingMovies ? `Filmy (réžia): ${counts.directingMovies}` : null,
-    counts.directingSeries ? `Seriály (réžia): ${counts.directingSeries}` : null,
-    counts.writingMovies ? `Filmy (scenár): ${counts.writingMovies}` : null,
-    counts.writingSeries ? `Seriály (scenár): ${counts.writingSeries}` : null
+  const identity = [
+    person.birthday ? `Narodenie: ${formatDate(person.birthday)}` : null,
+    person.deathday ? `Úmrtie: ${formatDate(person.deathday)}` : null,
+    person.place_of_birth ? `Miesto narodenia: ${person.place_of_birth}` : null,
+    person.known_for_department ? `Hlavná profesia: ${person.known_for_department}` : null
   ].filter(Boolean);
-  if (stats.length) lines.push(stats.join(' • '));
-  lines.push('Filmografiu nájdeš vo vyhľadávaní v katalógoch „🎬 Filmografia osoby – filmy“ a „📺 Filmografia osoby – seriály“. Oba sú zoradené od najnovšieho po najstarší titul.');
+
+  const sections = [];
+  if (person.biography) sections.push(`BIOGRAFIA\n${person.biography}`);
+  if (identity.length) sections.push(`ZÁKLADNÉ ÚDAJE\n${identity.join('\n')}`);
+  if (roles.length) sections.push(`PROFESIE\n${roles.join(' • ')}`);
+  if (stats.length) sections.push(`FILMOGRAFIA\n${stats.join(' • ')}`);
+
+  const popularSection = creditSection('⭐ POPULÁRNE', highlights.popular);
+  const latestSection = creditSection('🆕 NAJNOVŠIE', highlights.latest);
+  const upcomingSection = creditSection('📅 PRIPRAVOVANÉ', highlights.upcoming);
+  if (popularSection) sections.push(popularSection);
+  if (latestSection) sections.push(latestSection);
+  if (upcomingSection) sections.push(upcomingSection);
+  sections.push('Kompletnú filmografiu môžeš ďalej filtrovať v katalógoch addonu pre filmy, seriály, réžiu a produkciu.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
+  const imdbPersonId = person.external_ids?.imdb_id || null;
+  const links = [
+    { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` },
+    imdbPersonId ? { name: 'IMDb', category: 'imdb', url: `https://www.imdb.com/name/${imdbPersonId}/` } : null,
+    person.homepage ? { name: 'Oficiálna stránka', category: 'website', url: person.homepage } : null
+  ].filter(Boolean);
 
   return {
     id: `person:${person.id}`,
@@ -98,15 +181,51 @@ export async function getPersonMeta(rawId) {
     poster: personPhoto,
     background: imageUrl(person.profile_path, 'h632'),
     posterShape: 'poster',
-    description: lines.join('\n\n'),
-    releaseInfo: person.birthday || undefined,
+    description: sections.join('\n\n'),
+    releaseInfo: person.birthday ? String(person.birthday).slice(0, 4) : undefined,
     genres: roles,
-    links: [
-      { name: 'TMDB', category: 'tmdb', url: `https://www.themoviedb.org/person/${person.id}` }
-    ],
+    country: person.place_of_birth || undefined,
+    website: person.homepage || undefined,
+    links,
+    app_extras: {
+      person: {
+        tmdbId: person.id,
+        imdbId: imdbPersonId,
+        birthday: person.birthday || null,
+        deathday: person.deathday || null,
+        placeOfBirth: person.place_of_birth || null,
+        knownForDepartment: person.known_for_department || null,
+        creditCounts: counts,
+        popular: highlights.popular.map(item => ({
+          tmdbId: item.id,
+          type: item.media_type === 'tv' ? 'series' : 'movie',
+          name: creditTitle(item),
+          year: creditYear(item),
+          role: creditRole(item),
+          poster: imageUrl(item.poster_path, 'w500')
+        })),
+        latest: highlights.latest.map(item => ({
+          tmdbId: item.id,
+          type: item.media_type === 'tv' ? 'series' : 'movie',
+          name: creditTitle(item),
+          year: creditYear(item),
+          role: creditRole(item),
+          poster: imageUrl(item.poster_path, 'w500')
+        })),
+        upcoming: highlights.upcoming.map(item => ({
+          tmdbId: item.id,
+          type: item.media_type === 'tv' ? 'series' : 'movie',
+          name: creditTitle(item),
+          year: creditYear(item),
+          role: creditRole(item),
+          poster: imageUrl(item.poster_path, 'w500')
+        }))
+      }
+    },
     behaviorHints: {
       nuvioPerson: true,
       tmdbPersonId: person.id,
+      richPersonProfile: true,
       knownForDepartment: person.known_for_department || null,
       placeOfBirth: person.place_of_birth || null,
       birthday: person.birthday || null,
@@ -122,13 +241,13 @@ export async function getPersonCredits(rawId) {
   if (!Number.isFinite(id) || id <= 0) return [];
   const credits = await personCredits(id);
 
-  return uniqueCredits(credits).map(item => ({
+  return sortedCredits(credits).map(item => ({
     tmdbId: item.id,
     type: item.media_type === 'tv' ? 'series' : 'movie',
-    name: item.title || item.name || item.original_title || item.original_name || 'Bez názvu',
+    name: creditTitle(item),
     poster: imageUrl(item.poster_path, 'w500'),
     background: imageUrl(item.backdrop_path, 'w780'),
-    year: String(item.release_date || item.first_air_date || '').slice(0, 4) || null,
+    year: creditYear(item),
     character: item.character || null,
     job: item.job || null,
     popularity: item.popularity || 0
