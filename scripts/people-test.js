@@ -42,6 +42,8 @@ assert.equal(movie.runtime, '155 min');
 assert.deepEqual(movie.cast, ['Brad Pitt']);
 assert.deepEqual(movie.director, ['Joseph Kosinski']);
 assert.equal(movie.ids.imdb, movie.id);
+assert.equal(movie.behaviorHints.defaultVideoId, 'tt16311594');
+assert.equal(person.credits.find(c => c.type === 'series').behaviorHints, undefined);
 assert.equal(movie.ids.tmdb, '911430');
 assert.equal(movie._tmdb, undefined);
 assert.ok(person.credits.some(c => c.id === 'tt0000009' && c.type === 'series'));
