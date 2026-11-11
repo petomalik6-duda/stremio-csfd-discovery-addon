@@ -37,3 +37,22 @@ test('concurrent misses share a loader; failed loads can be retried', async () =
   await assert.rejects(cache.cached('retry', 1000, () => { throw new Error('offline'); }));
   assert.equal(await cache.cached('retry', 1000, () => 7), 7);
 });
+
+test('stale complete profiles return immediately while one refresh runs', async () => {
+  const { createRefreshingCache } = await import('../src/cache.js');
+  let time = 0, calls = 0, finish;
+  const cache = createRefreshingCache({ freshMs: 10, retainMs: 100000, now: () => time });
+  assert.equal(await cache.get('person', async () => 'old'), 'old');
+  time = 11;
+  const loader = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  assert.equal(await cache.get('person', loader), 'old');
+  assert.equal(await cache.get('person', loader), 'old');
+  assert.equal(calls, 1);
+  finish('new');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await cache.get('person', loader), 'new');
+  time = 30;
+  assert.equal(await cache.get('person', async () => { throw new Error('offline'); }), 'new');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await cache.get('person', () => { throw new Error('must back off'); }), 'new');
+});

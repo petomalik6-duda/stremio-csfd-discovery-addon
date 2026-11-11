@@ -60,3 +60,34 @@ const cache = createCache({ maxEntries: Number(process.env.CACHE_MAX_ENTRIES || 
 const cleanup = setInterval(cache.prune, 60_000);
 cleanup.unref();
 export const { getCached, setCached, cached, cacheStats } = cache;
+
+// A bounded profile store keeps the previous complete profile available while
+// one background refresh runs. Failed refreshes retain the last good value.
+export function createRefreshingCache({ maxEntries = 32, freshMs = 30 * 60_000, retainMs = 24 * 60 * 60_000, now = Date.now } = {}) {
+  const records = createCache({ maxEntries, now });
+  const pending = new Map();
+  const retryAfter = new Map();
+  function refresh(key, loader) {
+    if (pending.has(key)) return pending.get(key);
+    const request = Promise.resolve().then(loader).then(value => {
+      records.setCached(key, { value, at: now() }, retainMs);
+      return value;
+    }).finally(() => { pending.delete(key); retryAfter.delete(key); });
+    pending.set(key, request);
+    return request;
+  }
+  return {
+    async get(key, loader) {
+      const old = records.getCached(key);
+      if (!old) return refresh(key, loader);
+      if (now() - old.at >= freshMs && now() >= (retryAfter.get(key) || 0)) {
+        refresh(key, loader).catch(() => {
+          // Do not retry on every request during an upstream outage.
+          if (retryAfter.size >= maxEntries) retryAfter.delete(retryAfter.keys().next().value);
+          retryAfter.set(key, now() + 60_000);
+        });
+      }
+      return old.value;
+    }
+  };
+}

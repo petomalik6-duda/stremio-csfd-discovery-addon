@@ -1,4 +1,5 @@
-import { cached } from './cache.js';
+import { createRefreshingCache } from './cache.js';
+const profiles = createRefreshingCache();
 import { imageUrl, personCredits, personDetails, resolveTmdbItemToStremioMeta } from './tmdb.js';
 import { searchPeopleFuzzy } from './discovery.js';
 
@@ -153,7 +154,7 @@ export async function getPersonMeta(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return null;
 
-  return cached(`person-profile:${id}`, 5 * 60 * 1000, () => buildPersonMeta(id));
+  return profiles.get(`person-profile:${id}`, () => buildPersonMeta(id));
 }
 
 async function buildPersonMeta(id) {
