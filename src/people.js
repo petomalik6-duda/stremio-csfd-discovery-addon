@@ -1,3 +1,4 @@
+import { cached } from './cache.js';
 import { imageUrl, personCredits, personDetails, resolveTmdbItemToStremioMeta } from './tmdb.js';
 import { searchPeopleFuzzy } from './discovery.js';
 
@@ -152,6 +153,10 @@ export async function getPersonMeta(rawId) {
   const id = Number(String(rawId).replace(/^person:/, ''));
   if (!Number.isFinite(id) || id <= 0) return null;
 
+  return cached(`person-profile:${id}`, 5 * 60 * 1000, () => buildPersonMeta(id));
+}
+
+async function buildPersonMeta(id) {
   const [person, credits] = await Promise.all([personDetails(id), personCredits(id)]);
   const counts = countCredits(credits);
   const roles = roleSummary(counts);
