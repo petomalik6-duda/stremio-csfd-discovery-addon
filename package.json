@@ -1,6 +1,6 @@
 {
   "name": "stremio-csfd-discovery-addon",
-  "version": "1.4.10",
+  "version": "1.4.11",
   "description": "Nuvio/Stremio People addon with compact person profiles, faster typo-tolerant fuzzy person matching, and poster filmography catalogs for acting, creator, upcoming and documentary credits using standard TMDB/IMDb identities.",
   "type": "module",
   "main": "server.js",
