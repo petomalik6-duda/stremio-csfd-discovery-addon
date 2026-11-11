@@ -76,6 +76,28 @@ function countCredits(credits) {
   };
 }
 
+// AIOStreams/Jellyfin reads credits directly from a person meta. Keep the IDs
+// resolvable by this addon's /meta/movie and /meta/series endpoints.
+function embeddedCredits(credits) {
+  return sortedCredits(credits)
+    .filter(item => !(item.genre_ids || []).includes(10767)) // talk shows
+    .filter(item => !/^(self|archive footage|thanks)$/i.test(String(item.character || item.job || '').trim()))
+    .map(item => {
+      const type = item.media_type === 'tv' ? 'series' : 'movie';
+      const released = item.release_date || item.first_air_date || undefined;
+      return {
+        id: `tmdb:${type}:${item.id}`,
+        type,
+        name: creditTitle(item),
+        poster: imageUrl(item.poster_path, 'w500'),
+        background: imageUrl(item.backdrop_path, 'w780'),
+        released,
+        releaseInfo: creditYear(item) || undefined,
+        description: item.overview || undefined
+      };
+    });
+}
+
 function formatDate(value) {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return value || null;
@@ -122,7 +144,7 @@ export async function getPersonMeta(rawId) {
   if (identity.length) sections.push(`ZÁKLADNÉ ÚDAJE\n${identity.join('\n')}`);
   if (roles.length) sections.push(`PROFESIE\n${roles.join(' • ')}`);
   if (stats.length) sections.push(`FILMOGRAFIA\n${stats.join(' • ')}`);
-  sections.push('Plagátovú filmografiu nájdeš v katalógoch addonu: Populárne, Filmy, Seriály, Réžia/produkcia a Pripravované.');
+  sections.push('Filmy a seriály sú dostupné priamo vo filmografii tohto profilu aj v samostatných katalógoch addonu.');
 
   const personName = person.name || 'Neznáma osoba';
   const personPhoto = imageUrl(person.profile_path, 'w500');
@@ -146,6 +168,14 @@ export async function getPersonMeta(rawId) {
     country: person.place_of_birth || undefined,
     website: person.homepage || undefined,
     links,
+    birthday: person.birthday || undefined,
+    deathday: person.deathday || undefined,
+    birthPlace: person.place_of_birth || undefined,
+    ids: {
+      tmdb: String(person.id),
+      ...(imdbPersonId ? { imdb: imdbPersonId } : {})
+    },
+    credits: embeddedCredits(credits),
     app_extras: {
       person: {
         tmdbId: person.id,
@@ -166,7 +196,7 @@ export async function getPersonMeta(rawId) {
       birthday: person.birthday || null,
       deathday: person.deathday || null,
       creditCounts: counts,
-      filmographyCatalogsOnly: true
+      filmographyCatalogsOnly: false
     }
   };
 }
