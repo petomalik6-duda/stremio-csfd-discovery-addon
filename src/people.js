@@ -1,4 +1,4 @@
-import { imageUrl, personCredits, personDetails } from './tmdb.js';
+import { imageUrl, personCredits, personDetails, resolveTmdbItemToStremioMeta } from './tmdb.js';
 import { searchPeopleFuzzy } from './discovery.js';
 
 function personSearchMeta(person) {
@@ -76,10 +76,10 @@ function countCredits(credits) {
   };
 }
 
-// AIOStreams/Jellyfin reads credits directly from a person meta. Keep the IDs
-// resolvable by this addon's /meta/movie and /meta/series endpoints.
-function embeddedCredits(credits) {
-  return sortedCredits(credits)
+// Resolve filmography entries to the same IMDb identities as title details,
+// so metadata and stream addons can recognise them. Limit concurrent TMDB calls.
+async function embeddedCredits(credits) {
+  const rows = sortedCredits(credits)
     .filter(item => !(item.genre_ids || []).includes(10767)) // talk shows
     .filter(item => !/^(self|archive footage|thanks)$/i.test(String(item.character || item.job || '').trim()))
     .map(item => {
@@ -96,6 +96,31 @@ function embeddedCredits(credits) {
         description: item.overview || undefined
       };
     });
+  const result = new Array(rows.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(6, rows.length) }, async () => {
+    while (next < rows.length) {
+      const index = next++;
+      const row = rows[index];
+      try {
+        const tmdbId = Number(row.id.split(':').pop());
+        const { _tmdb, ...meta } = await resolveTmdbItemToStremioMeta({ id: tmdbId }, row.type);
+        result[index] = {
+          ...row,
+          ...meta,
+          description: meta.description || row.description,
+          ids: { tmdb: String(tmdbId), ...(_tmdb?.imdbId ? { imdb: _tmdb.imdbId } : {}) },
+          cast: _tmdb?.cast,
+          director: _tmdb?.directors
+        };
+      } catch (error) {
+        // One unavailable title must not hide the rest of the person's work.
+        console.warn('[person-credit]', row.id, error.message);
+        result[index] = row;
+      }
+    }
+  }));
+  return result;
 }
 
 function formatDate(value) {
@@ -175,7 +200,7 @@ export async function getPersonMeta(rawId) {
       tmdb: String(person.id),
       ...(imdbPersonId ? { imdb: imdbPersonId } : {})
     },
-    credits: embeddedCredits(credits),
+    credits: await embeddedCredits(credits),
     app_extras: {
       person: {
         tmdbId: person.id,
