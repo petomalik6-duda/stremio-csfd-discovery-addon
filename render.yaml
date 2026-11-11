@@ -3,7 +3,7 @@ services:
     name: stremio-csfd-discovery-addon
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /health
     envVars:

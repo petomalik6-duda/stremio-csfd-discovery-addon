@@ -5,7 +5,9 @@ process.env.TMDB_API_KEY = 'test-only';
 const { getPersonMeta } = await import('../src/people.js');
 let active = 0;
 let peak = 0;
+let requests = 0;
 axios.defaults.adapter = async config => {
+  requests++;
   let data;
   if (config.url.endsWith('/combined_credits')) {
     data = { cast: [
@@ -33,7 +35,11 @@ axios.defaults.adapter = async config => {
   }
   return { data, status: 200, statusText: 'OK', headers: {}, config };
 };
-const person = await getPersonMeta('person:287');
+const [person, samePerson] = await Promise.all([getPersonMeta('person:287'), getPersonMeta('person:287')]);
+assert.strictEqual(person, samePerson);
+const initialRequests = requests;
+assert.strictEqual(await getPersonMeta('person:287'), person);
+assert.equal(requests, initialRequests, 'warm profiles must not repeat title requests');
 assert.equal(person.credits.length, 3);
 const movie = person.credits.find(c => c.id === 'tt16311594');
 assert.ok(movie);
