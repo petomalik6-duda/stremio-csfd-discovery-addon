@@ -1,124 +1,60 @@
-# ČSFD Discovery – Stremio addon
+# ČSFD – osoby a filmografia
 
-Stremio discovery addon for movies and series with:
+Addon pre AIOStreams, Stremio a Nuvio. Vyhľadávanie osôb, biografia a filmografia používajú TMDB (vyžadujú vlastný kľúč). ČSFD dopĺňa hodnotenie a odkaz v detaile filmu alebo seriálu. Názov addonu neznamená natívne vyhľadávanie v databáze osôb ČSFD.
 
-- search by title,
-- search by actor/actress (`herec:`, `herečka:`),
-- search by director (`režisér:` / `reziser:`),
-- automatic person detection for queries such as `Tom Hanks`,
-- TMDB -> IMDb matching so other Stremio stream addons can recognize the selected title,
-- ČSFD metadata enrichment on the detail page,
-- movie and series discovery catalogs,
-- `skip` pagination with 100-item Stremio pages,
-- genre filtering,
-- CZ/SK discovery catalogs,
-- Render deployment blueprint.
+## AIOStreams: podporované rozhranie
 
-## Search examples
+Overené podľa [People API](https://aiostreams.org/reference/addon-protocol/people/) a [implementácie klienta](https://github.com/Viren070/AIOStreams/blob/113ab6bfd5888f494f78370e2b7fe5ee39897e1d/packages/core/src/jellyfin/people.ts), 16. novembra 2026. Podpora person metas a people search bola pridaná vo [v2.37](https://aiostreams.org/changelog/v2.37/). Staršie inštancie nemusia podporovať tento tok.
+
+1. Pridajte URL addonu končiacu `/manifest.json` ako vlastný addon v konfigurácii AIOStreams a povoľte katalógy aj metadata.
+2. Importujte alebo obnovte katalógy a povoľte `👤 Osoby` pre vyhľadávanie. Po zmene manifestu obnovte konfiguráciu addonu.
+3. V klientovi s podporou vyhľadávania osôb použite people search. AIOStreams vyhľadávanie titulov **nevolá person katalógy**. V bežnom vyhľadávaní filmov možno použiť existujúce filmografické katalógy a zadať meno osoby.
+4. Výsledok osoby sa otvorí cez `meta/person/{id}.json`. Podporované klienty zobrazia biografiu, dátumy a klikateľné filmy/seriály z poľa `credits`.
+
+Príklady protokolu:
 
 ```text
-Tom Hanks
-herec: Brad Pitt
-herečka: Nicole Kidman
-režisér: Christopher Nolan
-reziser: Denis Villeneuve
-osoba: Quentin Tarantino
+/catalog/person/csfd-people/search=Brad%20Pitt.json
+/meta/person/tmdb:287.json
+/meta/person/person:287.json
 ```
 
-An exact person-name match is treated as a creator/person search. Otherwise title search has priority, with a person-search fallback.
+Nové výsledky používajú štandardné `tmdb:287` a provider `ids`. Staršie odkazy `person:287` zostávajú funkčné a detail vráti pôvodné ID. Filmografia používa IMDb ID, ak je dostupné, inak `tmdb:movie:ID` alebo `tmdb:series:ID`; addon vie obslúžiť ich detaily. Dostupnosť prehrávania závisí od stream addonov a ich podpory ID. Chyba jedného titulu nezablokuje celý profil.
 
-## Catalogs
+Podľa dokumentácie Stremio zobrazuje osoby vo výsledkoch, ale ich stránka nemá streamy. Vykreslenie klikateľnej filmografie závisí od klienta; vlastné `/people/*` endpointy ani rozšírenie `nuvio` nie sú podmienkou AIOStreams kompatibility.
 
-### Movies
+## Zachované katalógy
 
-- 🔎 ČSFD Discovery – Hľadať film / herca / režiséra
-- 🔥 Discovery – Populárne filmy
-- ⭐ Discovery – Najlepšie hodnotené filmy
-- 🆕 Discovery – Nové filmy
-- 🇨🇿🇸🇰 Discovery – CZ/SK filmy
+Všetkých deväť existujúcich katalógov ostáva pod pôvodnými ID:
 
-### Series
+| Typ | ID | Obsah |
+| --- | --- | --- |
+| person | csfd-people | Osoby |
+| movie | csfd-person-movies | Herectvo – filmy |
+| series | csfd-person-series | Herectvo – seriály |
+| movie | csfd-person-creator-movies | Réžia/produkcia – filmy |
+| series | csfd-person-creator-series | Réžia/produkcia – seriály |
+| movie | csfd-person-upcoming-movies | Pripravované filmy |
+| series | csfd-person-upcoming-series | Pripravované seriály |
+| movie | csfd-person-special-movies | Dokumenty a krátke filmy |
+| series | csfd-person-documentary-series | Dokumentárne seriály |
 
-- 🔎 ČSFD Discovery – Hľadať seriál / herca / režiséra
-- 🔥 Discovery – Populárne seriály
-- ⭐ Discovery – Najlepšie hodnotené seriály
-- 🆕 Discovery – Nové seriály
-- 🇨🇿🇸🇰 Discovery – CZ/SK seriály
+Všetky vyžadujú `search`; filmografické katalógy podporujú `skip` a stránky po 20 tituloch. Príklady: `Tom Hanks`, `herec: Brad Pitt`, `režisér: Christopher Nolan`. Profilová filmografia je kompletný deduplikovaný zoznam práce osoby; vynecháva talk/news relácie, archívne a čestné kredity. Katalógy majú svoje doterajšie filtre.
 
-Browse catalogs support Stremio `skip` pagination and genre filtering.
+## Lokálne spustenie a testy
 
-## Data flow
+Node.js 20:
 
-```text
-Stremio search/catalog
-        |
-        v
-TMDB title/person discovery
-        |
-        v
-TMDB external IDs
-        |
-        +----> IMDb ID returned to Stremio whenever available
-        |
-        v
-Stremio detail request
-        |
-        +----> TMDB metadata
-        |
-        +----> ČSFD title match + rating / creators / link
-```
-
-The addon deliberately keeps ČSFD enrichment non-fatal. If ČSFD changes markup or temporarily rejects a request, the TMDB/IMDb result still works.
-
-## Environment
-
-Copy `.env.example` to `.env` and configure either a TMDB v3 API key or a v4 read token:
-
-```bash
-TMDB_API_KEY=your_key_here
-# or
-TMDB_READ_ACCESS_TOKEN=your_read_token_here
-```
-
-Do not commit credentials.
-
-## Local run
-
-```bash
-npm install
+```sh
+npm ci
 cp .env.example .env
-# add your TMDB key/token to .env
+# nastavte TMDB_API_KEY alebo TMDB_READ_ACCESS_TOKEN v .env
 npm start
+npm test
 ```
 
-Default local URL:
+Predvolená adresa je `http://127.0.0.1:10000/manifest.json`. `/health` kontroluje konfiguráciu a dostupnosť TMDB, `/stats` vracia cache štatistiky. Kľúče necommitujte.
 
-```text
-http://127.0.0.1:10000
-```
+Testy používajú deterministické odpovede TMDB: kontrolujú vyhľadávanie cez HTTP, otvorenie osoby, filmografiu a otvorenie detailu titulu, legacy ID, filtrovanie/deduplikáciu a cache. Nepredstavujú skúšku používateľského rozhrania konkrétnej AIOStreams inštancie ani živého TMDB účtu.
 
-Manifest:
-
-```text
-http://127.0.0.1:10000/manifest.json
-```
-
-## Render
-
-The repository contains `render.yaml`.
-
-1. Create a new Render Blueprint/Web Service from this repository.
-2. Set `TMDB_API_KEY` in Render environment variables.
-3. Deploy.
-4. Open `https://YOUR-SERVICE.onrender.com/health` and confirm `tmdbConfigured: true`.
-5. Install `https://YOUR-SERVICE.onrender.com/manifest.json` in Stremio/Nuvio.
-
-## Diagnostics
-
-- `/health` – service and TMDB configuration status
-- `/stats` – in-memory cache stats
-- `/debug/search?type=movie&q=Tom%20Hanks` – debug person/title search
-
-## Notes
-
-The browse catalogs use TMDB as the stable discovery/indexing source. ČSFD is used to enrich detail metadata (rating, creators, ČSFD link) and is cached/rate-limited through the addon cache layer. The next planned step is a dedicated ČSFD chart/catalog parser for native ČSFD rankings.
+Repozitár obsahuje `render.yaml`. Zmeny tohto PR nevyžadujú zmenu Render služieb; nasadenie je samostatný krok.

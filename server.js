@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { cacheStats } from './src/cache.js';
 import { searchFilmography } from './src/discovery.js';
 import { getMetaById, toPublicMeta } from './src/meta.js';
@@ -7,10 +9,10 @@ import { getPersonCredits, getPersonMeta, searchPeople } from './src/people.js';
 import { probeTmdb } from './src/tmdb.js';
 
 const PORT = Number(process.env.PORT || 10000);
-const ADDON_VERSION = process.env.npm_package_version || '1.4.9';
+const ADDON_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const FILMOGRAPHY_PAGE_SIZE = 20;
-const app = express();
+export const app = express();
 
 const searchExtra = [{ name: 'search', isRequired: true }];
 const pagedSearchExtra = [...searchExtra, { name: 'skip' }];
@@ -43,7 +45,7 @@ const manifest = {
     people: {
       enabled: true,
       catalogId: 'csfd-people',
-      idPrefix: 'person:',
+      idPrefix: 'tmdb:',
       richProfiles: true,
       compactProfileText: true,
       fuzzySearchVersion: 2,
@@ -148,7 +150,7 @@ app.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
 
 app.get('/meta/:type/:id.json', async (req, res, next) => {
   try {
-    if (String(req.params.id).startsWith('person:') && req.params.type === 'person') {
+    if (req.params.type === 'person') {
       return res.json({ meta: await getPersonMeta(req.params.id) });
     }
     if (!['movie', 'series'].includes(req.params.type)) return res.json({ meta: null });
@@ -232,4 +234,6 @@ app.use((err, req, res, _next) => {
   res.status(status >= 400 && status < 600 ? status : 500).json({ error: 'Addon request failed', detail });
 });
 
-app.listen(PORT, '0.0.0.0', () => console.log(`[startup] ${manifest.name} v${ADDON_VERSION} listening on ${PORT}`));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  app.listen(PORT, '0.0.0.0', () => console.log(`[startup] ${manifest.name} v${ADDON_VERSION} listening on ${PORT}`));
+}
