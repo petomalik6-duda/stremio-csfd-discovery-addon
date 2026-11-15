@@ -1,5 +1,6 @@
 import { createRefreshingCache } from './cache.js';
 const profiles = createRefreshingCache();
+const legacyProfiles = new WeakMap();
 import { imageUrl, personCredits, personDetails, resolveTmdbItemToStremioMeta } from './tmdb.js';
 import { searchPeopleFuzzy } from './discovery.js';
 
@@ -10,11 +11,12 @@ function personSearchMeta(person) {
     .slice(0, 4);
 
   return {
-    id: `person:${person.id}`,
+    id: `tmdb:${person.id}`,
     type: 'person',
     name: person.name || 'Neznáma osoba',
     poster: imageUrl(person.profile_path, 'w500'),
     posterShape: 'poster',
+    ids: { tmdb: String(person.id) },
     description: [person.known_for_department, knownFor.length ? `Známy/a z: ${knownFor.join(', ')}` : '']
       .filter(Boolean)
       .join('\n'),
@@ -43,10 +45,11 @@ function creditYear(item) {
   return String(item.release_date || item.first_air_date || '').slice(0, 4) || null;
 }
 
-function uniqueCredits(credits) {
+function uniqueCredits(credits, predicate = () => true) {
   const seen = new Set();
   return [...(credits.cast || []), ...(credits.crew || [])]
     .filter(item => item.media_type === 'movie' || item.media_type === 'tv')
+    .filter(predicate)
     .filter(item => {
       const key = `${item.media_type}:${item.id}`;
       if (seen.has(key)) return false;
@@ -55,8 +58,8 @@ function uniqueCredits(credits) {
     });
 }
 
-function sortedCredits(credits) {
-  return uniqueCredits(credits).sort((a, b) => {
+function sortedCredits(credits, predicate) {
+  return uniqueCredits(credits, predicate).sort((a, b) => {
     const dateDiff = creditDate(b) - creditDate(a);
     if (dateDiff !== 0) return dateDiff;
     return (b.popularity || 0) - (a.popularity || 0);
@@ -78,12 +81,24 @@ function countCredits(credits) {
   };
 }
 
+function isWorkCredit(item) {
+  if ((item.genre_ids || []).some(id => id === 10767 || id === 10763)) return false;
+  const role = String(item.job || item.character || '').trim();
+  return !/^(?:self|himself|herself|themselves|archive footage|thanks|special thanks|in memory of|characters)(?:$|\s*[-(/])/i.test(role)
+    && !/\(archive footage\)/i.test(role);
+}
+
+export function parsePersonId(rawId) {
+  const match = String(rawId).match(/^(?:(?:person|tmdb):)?([1-9]\d*)$/);
+  const id = match ? Number(match[1]) : NaN;
+  return Number.isSafeInteger(id) ? id : null;
+}
+
 // Resolve filmography entries to the same IMDb identities as title details,
 // so metadata and stream addons can recognise them. Limit concurrent TMDB calls.
 async function embeddedCredits(credits) {
-  const rows = sortedCredits(credits)
-    .filter(item => !(item.genre_ids || []).includes(10767)) // talk shows
-    .filter(item => !/^(self|archive footage|thanks)$/i.test(String(item.character || item.job || '').trim()))
+  const rows = uniqueCredits(credits, isWorkCredit)
+    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0) || creditDate(b) - creditDate(a))
     .map(item => {
       const type = item.media_type === 'tv' ? 'series' : 'movie';
       const released = item.release_date || item.first_air_date || undefined;
@@ -151,10 +166,14 @@ function statsSummary(counts) {
 }
 
 export async function getPersonMeta(rawId) {
-  const id = Number(String(rawId).replace(/^person:/, ''));
-  if (!Number.isFinite(id) || id <= 0) return null;
+  const id = parsePersonId(rawId);
+  if (!id) return null;
 
-  return profiles.get(`person-profile:${id}`, () => buildPersonMeta(id));
+  const meta = await profiles.get(`person-profile:${id}`, () => buildPersonMeta(id));
+  // Keep installed clients' legacy person: bookmarks working, including meta.id.
+  if (!String(rawId).startsWith('person:')) return meta;
+  if (!legacyProfiles.has(meta)) legacyProfiles.set(meta, { ...meta, id: `person:${id}` });
+  return legacyProfiles.get(meta);
 }
 
 async function buildPersonMeta(id) {
@@ -187,7 +206,7 @@ async function buildPersonMeta(id) {
   ].filter(Boolean);
 
   return {
-    id: `person:${person.id}`,
+    id: `tmdb:${person.id}`,
     type: 'person',
     name: personName,
     poster: personPhoto,
@@ -233,8 +252,8 @@ async function buildPersonMeta(id) {
 }
 
 export async function getPersonCredits(rawId) {
-  const id = Number(String(rawId).replace(/^person:/, ''));
-  if (!Number.isFinite(id) || id <= 0) return [];
+  const id = parsePersonId(rawId);
+  if (!id) return [];
   const credits = await personCredits(id);
 
   return sortedCredits(credits).map(item => ({
