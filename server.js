@@ -13,6 +13,7 @@ const ADDON_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.m
 const ADDON_ID = process.env.ADDON_ID || 'cz.csfd.discovery.v1';
 const FILMOGRAPHY_PAGE_SIZE = 20;
 export const app = express();
+const addonRoutes = express.Router();
 
 const searchExtra = [{ name: 'search', isRequired: true }];
 const pagedSearchExtra = [...searchExtra, { name: 'skip' }];
@@ -62,6 +63,20 @@ const manifest = {
   }
 };
 
+const nuvioManifest = {
+  ...manifest,
+  name: 'ČSFD – osoby a filmografia (Nuvio)',
+  nuvio: {
+    ...manifest.nuvio,
+    people: { ...manifest.nuvio.people, idPrefix: 'person:' }
+  }
+};
+
+function personSearchResults(people, baseUrl) {
+  if (baseUrl !== '/nuvio') return people;
+  return people.map(person => ({ ...person, id: person.id.replace(/^tmdb:/, 'person:') }));
+}
+
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');
@@ -99,7 +114,7 @@ function toFilmographyCatalogMeta(meta) {
   return { ...clean, releaseInfo: labels.length ? labels.join(' • ') : clean.releaseInfo };
 }
 
-async function catalogResponse(type, id, extra = {}) {
+async function catalogResponse(type, id, extra, baseUrl) {
   if (!knownCatalog(type, id)) return { metas: [] };
   const q = String(extra.search || '').trim();
   if (!q) return { metas: [] };
@@ -108,7 +123,7 @@ async function catalogResponse(type, id, extra = {}) {
   if (type === 'person') {
     const rows = await searchPeople(q, 20);
     console.log(`[people-search] q=${JSON.stringify(q)} count=${rows.length} ms=${Date.now() - started}`);
-    return { metas: rows };
+    return { metas: personSearchResults(rows, baseUrl) };
   }
 
   let category = 'main';
@@ -132,23 +147,23 @@ async function catalogResponse(type, id, extra = {}) {
 }
 
 app.get('/', (_req, res) => res.type('html').send('<!doctype html><html lang="sk"><body><h1>ČSFD – osoby a filmografia</h1><p>Rýchle fuzzy vyhľadávanie osôb a 8 posterových filmografických katalógov.</p><a href="/manifest.json">manifest.json</a></body></html>'));
-app.get('/manifest.json', (_req, res) => res.json(manifest));
-app.get('/catalog/:type/:id.json', async (req, res, next) => {
+addonRoutes.get('/manifest.json', (req, res) => res.json(req.baseUrl === '/nuvio' ? nuvioManifest : manifest));
+addonRoutes.get('/catalog/:type/:id.json', async (req, res, next) => {
   try {
-    res.json(await catalogResponse(req.params.type, req.params.id, req.query));
+    res.json(await catalogResponse(req.params.type, req.params.id, req.query, req.baseUrl));
   } catch (e) {
     next(e);
   }
 });
-app.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
+addonRoutes.get('/catalog/:type/:id/:extra.json', async (req, res, next) => {
   try {
-    res.json(await catalogResponse(req.params.type, req.params.id, parseExtra(req.params.extra)));
+    res.json(await catalogResponse(req.params.type, req.params.id, parseExtra(req.params.extra), req.baseUrl));
   } catch (e) {
     next(e);
   }
 });
 
-app.get('/meta/:type/:id.json', async (req, res, next) => {
+addonRoutes.get('/meta/:type/:id.json', async (req, res, next) => {
   try {
     if (req.params.type === 'person') {
       return res.json({ meta: await getPersonMeta(req.params.id) });
@@ -160,22 +175,22 @@ app.get('/meta/:type/:id.json', async (req, res, next) => {
   }
 });
 
-app.get('/people/search.json', async (req, res, next) => {
+addonRoutes.get('/people/search.json', async (req, res, next) => {
   try {
     const q = String(req.query.search || req.query.q || '').trim();
-    res.json({ people: q ? await searchPeople(q, 20) : [] });
+    res.json({ people: q ? personSearchResults(await searchPeople(q, 20), req.baseUrl) : [] });
   } catch (e) {
     next(e);
   }
 });
-app.get('/people/:id.json', async (req, res, next) => {
+addonRoutes.get('/people/:id.json', async (req, res, next) => {
   try {
     res.json({ person: await getPersonMeta(req.params.id) });
   } catch (e) {
     next(e);
   }
 });
-app.get('/people/:id/credits.json', async (req, res, next) => {
+addonRoutes.get('/people/:id/credits.json', async (req, res, next) => {
   try {
     res.json({
       personId: String(req.params.id).replace(/^person:/, ''),
@@ -185,6 +200,9 @@ app.get('/people/:id/credits.json', async (req, res, next) => {
     next(e);
   }
 });
+
+app.use('/nuvio', addonRoutes);
+app.use(addonRoutes);
 
 app.get('/health', async (_req, res) => {
   const configured = Boolean(process.env.TMDB_API_KEY || process.env.TMDB_READ_ACCESS_TOKEN);

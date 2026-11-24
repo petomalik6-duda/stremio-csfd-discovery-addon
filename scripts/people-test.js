@@ -131,7 +131,23 @@ try {
   assert.deepEqual((await get('/catalog/person/unknown/search=Brad.json')).metas, []);
   assert.equal((await get('/meta/movie/tmdb:series:9.json')).meta, null);
   assert.equal((await get('/people/person:287.json')).person.id, 'person:287');
-  console.log('AIOStreams people HTTP contract passed');
+  const nuvioManifest = await get('/nuvio/manifest.json');
+  assert.equal(nuvioManifest.nuvio.people.idPrefix, 'person:');
+  assert.equal(manifest.nuvio.people.idPrefix, 'tmdb:');
+  for (const path of [
+    `/nuvio/catalog/person/${catalog.id}/search=Brad%20Pitt.json`,
+    `/nuvio/catalog/person/${catalog.id}.json?search=Brad%20Pitt`
+  ]) {
+    const { metas } = await get(path);
+    assert.equal(metas[0].id, 'person:287');
+    const { meta } = await get('/nuvio/meta/person/person%3A287.json');
+    assert.equal(meta.type, 'person');
+    assert.equal(meta.id, metas[0].id);
+    assert.ok(meta.description.includes('Biography'));
+  }
+  assert.equal((await get('/nuvio/meta/movie/tt16311594.json')).meta.id, 'tt16311594');
+  assert.equal((await get('/nuvio/people/search.json?q=Brad%20Pitt')).people[0].id, 'person:287');
+  console.log('AIOStreams and Nuvio people HTTP contracts passed');
 } finally {
   await new Promise(resolve => server.close(resolve));
 }
